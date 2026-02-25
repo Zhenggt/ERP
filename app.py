@@ -73,5 +73,43 @@ if check_password():
 
     # --- 模块 C：销售出库 ---
     elif menu == "📤 销售出库":
-        st.header("🧾 销售出库单")
-        st.write("此处可以根据实际业务需求，增加减库存的逻辑。")
+        st.header("🧾 销售出库登记")
+        
+        # 1. 先从数据库读取有货的商品
+        try:
+            df_products = pd.read_sql("SELECT name, stock FROM products WHERE stock > 0", engine)
+            product_list = df_products['name'].tolist()
+            
+            if not product_list:
+                st.warning("仓库没货了，请先去【进货登记】。")
+            else:
+                with st.form("sale_form", clear_on_submit=True):
+                    customer = st.text_input("客户名称 (选填)")
+                    target_p = st.selectbox("选择要卖出的商品", product_list)
+                    num = st.number_input("销售数量", min_value=1, step=1)
+                    
+                    # 获取当前选定商品的库存余量
+                    current_stock = df_products[df_products['name'] == target_p]['stock'].values[0]
+                    st.caption(f"💡 当前库存余量：{current_stock}")
+
+                    if st.form_submit_button("确认出库"):
+                        if num > current_stock:
+                            st.error(f"❌ 库存不足！你最多只能卖出 {current_stock} 件。")
+                        else:
+                            with engine.connect() as conn:
+                                # A. 减库存
+                                conn.execute(
+                                    text("UPDATE products SET stock = stock - :n WHERE name = :p"),
+                                    {"n": num, "p": target_p}
+                                )
+                                # B. 记流水
+                                conn.execute(
+                                    text("INSERT INTO orders (type, customer, product, num) VALUES ('销售', :c, :p, :n)"),
+                                    {"c": customer, "p": target_p, "n": num}
+                                )
+                                conn.commit()
+                            st.success(f"🚀 出库成功！{target_p} 已减去 {num} 件。")
+                            st.balloons()
+        except:
+            st.error("数据读取失败，请检查数据库表结构。")
+
