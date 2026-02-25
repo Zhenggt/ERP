@@ -1,62 +1,46 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from sqlalchemy import create_engine, text
 
-# --- 1. 模拟数据库 (实际使用时会保存到文件) ---
-if 'products' not in st.session_state:
-    st.session_state.products = pd.DataFrame([
-        {"商品名称": "不锈钢管 A", "库存": 100, "单价": 50.0},
-        {"商品名称": "铝合金框 B", "库存": 50, "单价": 120.0}
-    ])
+# --- 1. 安全读取云端配置 ---
+# 这里不需要手动填 URI，它会自动去 Streamlit 的 Secrets 里找
+try:
+    DB_URL = st.secrets["db_uri"]
+except:
+    st.error("请在 Streamlit Cloud 的 Secrets 中配置 db_uri")
+    st.stop()
 
-if 'orders' not in st.session_state:
-    st.session_state.orders = pd.DataFrame(columns=["日期", "客户", "商品", "数量", "金额"])
+engine = create_engine(DB_URL)
 
 # --- 2. 界面设计 ---
-st.title("🚀 我的私有进销存系统")
+st.set_page_config(page_title="云端进销存系统", layout="wide")
+st.title("🛡️ 真正属于你的云端管理系统")
 
-# 侧边栏：导航
-menu = st.sidebar.selectbox("菜单", ["销售出库", "库存查询", "统计报表"])
+menu = st.sidebar.radio("菜单", ["库存报表", "出入库操作", "历史明细"])
 
-if menu == "销售出库":
-    st.header("🛒 新增销售单")
-    with st.form("order_form"):
-        customer = st.text_input("客户名称")
-        prod_name = st.selectbox("选择商品", st.session_state.products["商品名称"])
-        quantity = st.number_input("销售数量", min_value=1, step=1)
+# --- 3. 业务功能 ---
+if menu == "库存报表":
+    st.subheader("实时库存盘点")
+    try:
+        df = pd.read_sql("SELECT name, spec, stock, sell_price FROM products", engine)
+        st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.warning("数据库中尚无数据表，请先进行一次入库操作。")
+
+elif menu == "出入库操作":
+    st.subheader("单据录入")
+    with st.form("jxc_form"):
+        col1, col2 = st.columns(2)
+        p_name = col1.text_input("商品品名")
+        p_type = col2.selectbox("操作类型", ["进货入库", "销售出库"])
+        p_num = col1.number_input("数量", min_value=1)
+        p_customer = col2.text_input("往来单位/客户")
         
-        submitted = st.form_submit_button("确认出库并打印")
-        if submitted:
-            # 逻辑：减库存
-            idx = st.session_state.products[st.session_state.products["商品名称"] == prod_name].index[0]
-            if st.session_state.products.at[idx, "库存"] >= quantity:
-                st.session_state.products.at[idx, "库存"] -= quantity
-                
-                # 逻辑：记订单
-                price = st.session_state.products.at[idx, "单价"]
-                new_order = {"日期": datetime.now().strftime("%Y-%m-%d"), "客户": customer, 
-                             "商品": prod_name, "数量": quantity, "金额": price * quantity}
-                st.session_state.orders = pd.concat([st.session_state.orders, pd.DataFrame([new_order])], ignore_index=True)
-                st.success(f"出库成功！总金额：{price * quantity} 元")
-            else:
-                st.error("库存不足！")
-
-elif menu == "库存查询":
-    st.header("📦 当前库存状态")
-    st.table(st.session_state.products)
-
-elif menu == "统计报表":
-    st.header("📊 销售数据统计")
-    if not st.session_state.orders.empty:
-        # 简单统计
-        total_sales = st.session_state.orders["金额"].sum()
-        st.metric("累计销售额", f"￥{total_sales}")
-        
-        # 销量排行图表
-        st.bar_chart(st.session_state.orders.groupby("商品")["数量"].sum())
-        
-        # 明细表
-        st.subheader("历史单据 (对账用)")
-        st.dataframe(st.session_state.orders)
-    else:
-        st.info("暂无销售数据")
+        if st.form_submit_button("立即同步到云端"):
+            with engine.connect() as conn:
+                # 简单的入库逻辑：这里仅做流水记录，实际可扩展库存自动计算
+                query = text("INSERT INTO orders (type, customer, product, num) VALUES (:t, :c, :p, :n)")
+                conn.execute(query, {"t": p_type, "c": p_customer, "p": p_name, "n": p_num})
+                conn.commit()
+            st.success(f"云端同步成功！已记录一笔{p_type}单据。")
+            st.balloons()
