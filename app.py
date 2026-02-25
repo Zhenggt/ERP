@@ -19,7 +19,7 @@ engine = get_engine()
 # --- 2. 安全验证模块 ---
 def check_password():
     if "password_correct" not in st.session_state:
-        st.title("🏮 南总进销存云系统")
+        st.title("🏮 进销存云系统")
         st.subheader("身份验证")
         user_input = st.text_input("管理员账号")
         pass_input = st.text_input("管理员密码", type="password")
@@ -118,3 +118,4 @@ if check_password():
                             st.cache_data.clear() # 出库后清除缓存
         except:
             st.error("数据加载失败。")
+
