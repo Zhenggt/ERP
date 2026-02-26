@@ -74,30 +74,37 @@ if check_password():
                     conn.commit()
                 st.success(f"✅ {name} 已入库")
                 st.cache_data.clear() # 清除缓存强制刷新数据
-   # --- C. 销售出库 ---
-    elif menu == "📤 销售出库":
-        st.header("📤 销售出库单 (公斤)")
-        # ... (前面读取数据库逻辑保持不变)
-        with st.form("out_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
-                target_p = st.selectbox("📦 选择货品", df_p['name'].tolist())
-            with col2:
-                # 把数量改为重量，支持小数
-                num = st.number_input("🔢 出库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
-                price = st.number_input("💰 销售单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
+ elif menu == "📤 销售出库":
+        st.header("📤 销售出库单 (单位：公斤)")
+        try:
+            df_p = pd.read_sql("SELECT name, stock FROM products WHERE stock > 0", engine)
+            df_c = pd.read_sql("SELECT name FROM customers", engine)
             
-            # 计算预览
-            total = num * price
-            st.info(f"💡 计算结果：{num} 公斤 × {price} 元/公斤 = ￥{total:,.2f}")
-            # ... (后续提交逻辑保持不变)
+            if df_p.empty:
+                st.warning("仓库目前无货，请先办理入库。")
+            else:
+                with st.form("out_form", clear_on_submit=True):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
+                        target_p = st.selectbox("📦 选择货品", df_p['name'].tolist())
+                    with col2:
+                        # 支持小数录入，例如 1.5 公斤
+                        num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01, format="%.2f")
+                        price = st.number_input("💰 销售单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
                     
-                    if st.form_submit_button("确认成交并减库存"):
-                        current_stock = df_p[df_p['name'] == target_p]['stock'].values[0]
-                        
+                    total = num * price
+                    st.info(f"💡 合计：{num} 公斤 × {price} 元/公斤 = ￥{total:,.2f}")
+                    
+                    # --- 注意下面这行的对齐情况 ---
+                    submit = st.form_submit_button("确认出库并扣减库存")
+                    
+                    if submit:
+                        current_stock = float(df_p[df_p['name'] == target_p]['stock'].values[0])
                         if num > current_stock:
-                            st.error(f"❌ 库存不足！{target_p} 仅剩 {current_stock} 件")
+                            st.error(f"❌ 库存不足！{target_p} 仅剩 {current_stock} 公斤")
+                        elif num <= 0:
+                            st.error("❌ 出库重量必须大于 0")
                         else:
                             with engine.connect() as conn:
                                 # A. 减库存
@@ -105,15 +112,14 @@ if check_password():
                                     text("UPDATE products SET stock = stock - :n WHERE name = :p"),
                                     {"n": num, "p": target_p}
                                 )
-                                # B. 记流水（存入单价和总价）
+                                # B. 记流水
                                 conn.execute(
                                     text("""INSERT INTO orders (type, customer, product, num, price, total_amount) 
                                             VALUES ('销售', :c, :p, :n, :pr, :t)"""),
                                     {"c": target_c, "p": target_p, "n": num, "pr": price, "t": total}
                                 )
                                 conn.commit()
-                            st.success(f"🚀 出库成功！已记录单价 ￥{price}，总额 ￥{total}")
-                            st.balloons()
+                            st.success(f"🚀 出库成功！{target_p} 减少 {num} 公斤")
                             st.cache_data.clear()
         except Exception as e:
             st.error(f"出库模块运行异常: {e}")
@@ -163,6 +169,7 @@ if check_password():
                     st.info("目前名册里还没有人，请在左边【新增客户】里添加。")
             except:
                 st.error("无法读取名册，请确认您已在 Supabase 运行了建表 SQL 代码。")
+
 
 
 
