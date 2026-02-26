@@ -100,31 +100,43 @@ if check_password():
             if df_p.empty:
                 st.warning("仓库目前无货。")
             else:
-                # 合并显示，防止选错型号
+                # 1. 准备数据
                 df_p['display_name'] = df_p['name'] + " | " + df_p['spec'].fillna("无规格")
                 
-                with st.form("out_form", clear_on_submit=True):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
-                        selected_option = st.selectbox("📦 选择货品 (品名 | 规格)", df_p['display_name'].tolist())
-                    
-                    # 拆分选择的品名和规格
-                    target_p = selected_option.split(" | ")[0]
-                    target_s = selected_option.split(" | ")[1]
-                    if target_s == "无规格": target_s = ""
+                # 2. 这里的输入框不放在 st.form 里，实现实时互动
+                col1, col2 = st.columns(2)
+                with col1:
+                    target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
+                    selected_option = st.selectbox("📦 选择货品 (品名 | 规格)", df_p['display_name'].tolist())
+                
+                # 拆分选择的品名和规格
+                target_p = selected_option.split(" | ")[0]
+                target_s = selected_option.split(" | ")[1]
+                if target_s == "无规格": target_s = ""
 
-                    with col2:
-                        num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01)
-                        price = st.number_input("💰 销售单价", min_value=0.0, step=0.01)
-                        # --- 新增：实时金额计算展示 ---
-                        total_val = round(num * price, 2)
-                        if total_val > 0:
-                            st.info(f"💵 **本次合计金额：¥{total_val:,}**")
-                        else:
-                            st.write("请输入重量和单价以计算总额")
+                with col2:
+                    # 这里的输入会立即触发页面重新计算
+                    num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01)
+                    price = st.number_input("💰 销售单价 (元/公斤)", min_value=0.0, step=0.01)
 
-                    if st.form_submit_button("确认出库"):
+                # --- 重点：在这里直接计算并展示，无需等待点击按钮 ---
+                total_val = round(num * price, 2)
+                
+                # 使用大字号或醒目的颜色展示总价
+                st.markdown(f"""
+                <div style="background-color:#f0f2f6; padding:20px; border-radius:10px; border-left: 5px solid #ff4b4b;">
+                    <span style="color:#555; font-size:16px;">本次交易预估总额</span><br>
+                    <span style="color:#ff4b4b; font-size:32px; font-weight:bold;">¥ {total_val:,.2f}</span>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.write("") # 留点间距
+
+                # 3. 提交操作使用普通的 st.button
+                if st.button("🚀 确认提交并扣减库存", use_container_width=True):
+                    if num <= 0:
+                        st.error("请输入出库重量")
+                    else:
                         # 精确匹配品名和规格查找库存
                         current_row = df_p[(df_p['name'] == target_p) & (df_p['spec'] == target_s)]
                         current_stock = float(current_row['stock'].values[0])
@@ -133,15 +145,14 @@ if check_password():
                             st.error(f"库存不足！当前仅剩 {current_stock} 公斤")
                         else:
                             with engine.connect() as conn:
-                                # 扣减库存时同时匹配品名和规格
+                                # 扣减库存
                                 conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"),
                                              {"n": num, "p": target_p, "s": target_s})
                                 # 记录流水
-                                conn.execute(text("INSERT INTO orders (type, customer, product, num, price, total_amount) VALUES ('销售', :c, :p, :n, :pr, :t)"),
-                                             {"c": target_c, "p": selected_option, "n": num, "pr": price, "t": num * price})
                                 conn.commit()
-                            st.success(f"🚀 {selected_option} 出库成功！")
+                            st.success(f"✅ {selected_option} 已出库，总金额 ¥{total_val:,.2f}")
                             st.cache_data.clear()
+                            
         except Exception as e:
             st.error(f"模块运行异常: {e}")
 
@@ -174,4 +185,5 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
 
