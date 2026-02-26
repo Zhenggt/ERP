@@ -70,7 +70,6 @@ if check_password():
             with col2:
                 num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
                 in_price = st.number_input("采购单价 (元/公斤)", min_value=0.0, step=0.01)
-            
            if st.form_submit_button("确认入库"):
                 if name:
                     with engine.connect() as conn:
@@ -80,7 +79,6 @@ if check_password():
                             ON CONFLICT (name, spec) 
                             DO UPDATE SET stock = products.stock + :num
                         """), {"n": name, "s": spec, "num": num})
-                        
                         conn.execute(text("""
                             INSERT INTO orders (type, product, num, price, total_amount) 
                             VALUES ('进货', :p, :n, :pr, :t)
@@ -173,5 +171,6 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
 
 
