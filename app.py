@@ -39,8 +39,7 @@ if check_password():
     if st.sidebar.button("退出登录"):
         del st.session_state["password_correct"]
         st.rerun()
-
-    # --- A. 库存看板 ---
+ # --- A. 库存看板 ---
     if menu == "📊 库存看板":
         st.header("📈 实时库存报表 (单位：公斤)")
         @st.cache_data(ttl=10)
@@ -51,13 +50,14 @@ if check_password():
         
         try:
             df = load_inventory()
-            # 假设你在入库时录入了采购单价，或者我们在看板手动算
-            # 这里先展示基础库存卡片
-            total_kg = df['库存余量(公斤)'].sum()
-            st.columns(3)[0].metric("总仓储备 (公斤)", f"{total_kg:,.2f}")
-            st.dataframe(df, width='stretch', hide_index=True)
+            
             if not df.empty:
-                st.dataframe(df, width='stretch', hide_index=True)
+                # 1. 展示顶部统计卡片
+                total_kg = df['库存余量(公斤)'].sum()
+                st.metric("总仓储备 (公斤)", f"{total_kg:,.2f}")
+                
+                # 2. 只保留这一个表格展示命令
+                st.dataframe(df, use_container_width=True, hide_index=True)
             else:
                 st.info("目前库存为空，请先录入采购信息。")
         except Exception as e:
@@ -185,5 +185,6 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
 
 
