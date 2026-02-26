@@ -70,22 +70,19 @@ if check_password():
             with col2:
                 num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
                 in_price = st.number_input("采购单价 (元/公斤)", min_value=0.0, step=0.01)
-           if st.form_submit_button("确认入库"):
+            
+            # --- 注意！这行一定要和上面的 col1, col2 垂直对齐 ---
+            if st.form_submit_button("确认入库"):
                 if name:
                     with engine.connect() as conn:
-                        # 注意：下面这两行必须比 with 语句多出 4 个空格
-                        conn.execute(text(""" 
+                        # 数据库执行部分再向右缩进一次
+                        conn.execute(text("""
                             INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) 
                             ON CONFLICT (name, spec) 
                             DO UPDATE SET stock = products.stock + :num
                         """), {"n": name, "s": spec, "num": num})
-                        conn.execute(text("""
-                            INSERT INTO orders (type, product, num, price, total_amount) 
-                            VALUES ('进货', :p, :n, :pr, :t)
-                        """), {"p": name, "n": num, "pr": in_price, "t": num * in_price})
-                        
                         conn.commit()
-                    st.success(f"✅ {name} | {spec} 已入库")
+                    st.success(f"✅ {name} | {spec} 已成功入库")
                     st.cache_data.clear()
                 else:
                     st.error("请输入货品名称")
@@ -171,6 +168,7 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
 
 
 
