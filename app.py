@@ -102,11 +102,11 @@ if check_password():
                     st.cache_data.clear()
 
     # --- C. 销售出库 ---
-    elif menu == "📤 销售出库":
+   elif menu == "📤 销售出库":
         st.header("📤 销售出库单")
         try:
             df_p = pd.read_sql("SELECT name, spec, stock FROM products WHERE stock > 0", engine)
-            df_c = pd.read_sql("SELECT name FROM customers", engine)
+            df_c = pd.read_sql("SELECT name, phone, address FROM customers", engine)
             
             if df_p.empty:
                 st.warning("仓库目前无货。")
@@ -116,6 +116,10 @@ if check_password():
                 col1, col2 = st.columns(2)
                 with col1:
                     target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
+                    if target_c != "散客":
+                        cust_info = df_c[df_c['name'] == target_c].iloc[0]
+                        st.caption(f"📞 {cust_info['phone'] or '无电话'} | 📍 {cust_info['address'] or '无地址'}")
+                    
                     selected_option = st.selectbox("📦 选择货品", df_p['display_name'].tolist())
                 
                 target_p = selected_option.split(" | ")[0]
@@ -123,12 +127,10 @@ if check_password():
                 if target_s == "无规格": target_s = ""
 
                 with col2:
-                    num = st.number_input("⚖️ 出库重量", min_value=0.0, step=0.01)
-                    price = st.number_input("💰 销售单价", min_value=0.0, step=0.01)
+                    num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01)
+                    price = st.number_input("💰 销售单价 (元/公斤)", min_value=0.0, step=0.01)
 
                 total_val = round(num * price, 2)
-                
-                # 金额实时跳动大屏
                 st.markdown(f"""
                 <div style="background-color:#1e293b; padding:20px; border-radius:15px; text-align:center; border: 2px solid #3b82f6; margin: 15px 0;">
                     <p style="color:#cbd5e1; font-size:14px; margin:0;">本次合计金额</p>
@@ -136,7 +138,7 @@ if check_password():
                 </div>
                 """, unsafe_allow_html=True)
 
-                if st.button("🚀 确认提交并扣减库存", use_container_width=True):
+                if st.button("确认提交并扣减库存", use_container_width=True):
                     current_stock = float(df_p[df_p['display_name'] == selected_option]['stock'].values[0])
                     if num > current_stock:
                         st.error(f"库存不足！当前仅剩 {current_stock} 公斤")
@@ -151,11 +153,11 @@ if check_password():
                                 VALUES ('销售', :c, :p, :n, :pr, :t)
                             """), {"c": target_c, "p": selected_option, "n": num, "pr": price, "t": total_val})
                             conn.commit()
-                        st.success(f"✅ {selected_option} 出库成功！")
+                        st.success(f"✅ {selected_option} 出库成功")
                         st.cache_data.clear()
         except Exception as e:
             st.error(f"运行异常: {e}")
-
+            
    # --- D. 历史流水 ---
     elif menu == "🧾 历史流水":
         st.header("🧾 历史交易记录")
@@ -304,5 +306,6 @@ if check_password():
                 st.info("暂无客户信息，请通过上方表单添加。")
         except Exception as e:
             st.error(f"加载列表失败，可能需要升级数据库字段：{e}")
+
 
 
