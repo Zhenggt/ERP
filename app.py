@@ -136,22 +136,81 @@ if check_password():
             else: st.info("暂无数据")
         except Exception as e: st.error(f"失败: {e}")
 
-    # --- E. 客户档案 ---
+  # --- E. 客户档案 ---
     elif menu == "👥 客户档案":
-        st.header("👥 客户档案")
-        with st.form("c_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            name = c1.text_input("客户名称*")
-            phone = c1.text_input("电话")
-            addr = c2.text_input("地址")
-            note = c2.text_input("备注")
-            if st.form_submit_button("保存"):
-                if name:
-                    with engine.connect() as conn:
-                        conn.execute(text("INSERT INTO customers (name, phone, address, note) VALUES (:n, :p, :a, :nt) ON CONFLICT (name) DO UPDATE SET phone=EXCLUDED.phone, address=EXCLUDED.address, note=EXCLUDED.note"), {"n": name, "p": phone, "a": addr, "nt": note})
-                        conn.commit()
-                    st.success("保存成功")
-                    st.cache_data.clear()
+        st.header("👥 客户档案管理")
         
-        df_c = pd.read_sql("SELECT name as 姓名, phone as 电话, address as 地址 FROM customers", engine)
-        st.dataframe(df_c, width='stretch', hide_index=True)
+        # 1. 获取现有客户数据
+        try:
+            df_cust = pd.read_sql("SELECT name, phone, address, note FROM customers ORDER BY name", engine)
+            
+            tabs = st.tabs(["➕ 新增/修改客户", "📋 客户列表"])
+            
+            with tabs[0]:
+                st.subheader("编辑客户信息")
+                # 模式选择：新增还是修改
+                edit_mode = st.radio("操作类型", ["修改现有客户", "添加新客户"], horizontal=True)
+                
+                with st.form("c_form", clear_on_submit=True):
+                    if edit_mode == "修改现有客户" and not df_cust.empty:
+                        # 如果是修改模式，先选人，自动填入原信息
+                        target_name = st.selectbox("选择要修改的客户", df_cust['name'].tolist())
+                        # 获取该客户的原有信息作为默认值
+                        old_info = df_cust[df_cust['name'] == target_name].iloc[0]
+                        
+                        c1, c2 = st.columns(2)
+                        new_name = c1.text_input("客户名称*", value=old_info['name'], disabled=True) # 名称通常不改
+                        new_phone = c1.text_input("新电话", value=old_info['phone'] or "")
+                        new_addr = c2.text_input("新地址", value=old_info['address'] or "")
+                        new_note = c2.text_input("新备注", value=old_info['note'] or "")
+                    else:
+                        # 如果是新增模式，显示空表单
+                        target_name = None
+                        c1, c2 = st.columns(2)
+                        new_name = c1.text_input("客户名称* (新)")
+                        new_phone = c1.text_input("电话")
+                        new_addr = c2.text_input("地址")
+                        new_note = c2.text_input("备注")
+                    
+                    if st.form_submit_button("💾 保存/更新资料"):
+                        final_name = target_name if edit_mode == "修改现有客户" else new_name
+                        if final_name:
+                            with engine.connect() as conn:
+                                conn.execute(text("""
+                                    INSERT INTO customers (name, phone, address, note) 
+                                    VALUES (:n, :p, :a, :nt) 
+                                    ON CONFLICT (name) DO UPDATE SET 
+                                        phone=EXCLUDED.phone, 
+                                        address=EXCLUDED.address, 
+                                        note=EXCLUDED.note
+                                """), {"n": final_name, "p": new_phone, "a": new_addr, "nt": new_note})
+                                conn.commit()
+                            st.success(f"✅ {final_name} 的资料已更新")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("请输入客户名称")
+
+            with tabs[1]:
+                st.subheader("所有客户清单")
+                if not df_cust.empty:
+                    st.dataframe(df_cust.rename(columns={
+                        'name': '姓名', 'phone': '电话', 'address': '地址', 'note': '备注'
+                    }), width='stretch', hide_index=True)
+                    
+                    # 快速删除功能
+                    with st.expander("🗑️ 危险操作：删除客户"):
+                        del_name = st.selectbox("选择要彻底删除的客户", ["--选择--"] + df_cust['name'].tolist())
+                        if st.button("确认删除记录"):
+                            if del_name != "--选择--":
+                                with engine.connect() as conn:
+                                    conn.execute(text("DELETE FROM customers WHERE name = :n"), {"n": del_name})
+                                    conn.commit()
+                                st.warning(f"已删除客户：{del_name}")
+                                st.cache_data.clear()
+                                st.rerun()
+                else:
+                    st.info("暂无数据")
+                    
+        except Exception as e:
+            st.error(f"客户模块加载异常: {e}")
