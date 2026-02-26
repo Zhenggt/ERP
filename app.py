@@ -247,16 +247,62 @@ if check_password():
                 st.info("暂无交易记录")
         except Exception as e:
             st.error(f"查询流水失败: {e}")
-    # --- E. 客户档案 ---
+ # --- E. 客户档案 ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息档案")
-        with st.form("cust_form", clear_on_submit=True):
-            c_name = st.text_input("客户名称")
-            if st.form_submit_button("保存客户"):
-                if c_name:
-                    with engine.connect() as conn:
-                        conn.execute(text("INSERT INTO customers (name) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": c_name})
-                        conn.commit()
-                    st.success(f"客户 {c_name} 已保存")
-                    st.cache_data.clear()
+        
+        # 1. 录入新客户
+        with st.expander("➕ 添加新客户", expanded=True):
+            with st.form("cust_form", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                with c1:
+                    c_name = st.text_input("客户/单位名称*", placeholder="必填")
+                    c_phone = st.text_input("联系电话")
+                with c2:
+                    c_address = st.text_input("联系地址")
+                    c_note = st.text_input("备注信息")
+                
+                if st.form_submit_button("保存客户信息"):
+                    if c_name:
+                        with engine.connect() as conn:
+                            # 确保数据库表支持这些字段，如果报错请看下方的 SQL 修复
+                            conn.execute(text("""
+                                INSERT INTO customers (name, phone, address, note) 
+                                VALUES (:n, :p, :a, :nt) 
+                                ON CONFLICT (name) DO UPDATE SET 
+                                    phone = EXCLUDED.phone, 
+                                    address = EXCLUDED.address,
+                                    note = EXCLUDED.note
+                            """), {"n": c_name, "p": c_phone, "a": c_address, "nt": c_note})
+                            conn.commit()
+                        st.success(f"✅ 客户【{c_name}】资料已保存/更新")
+                        st.cache_data.clear()
+                    else:
+                        st.error("请输入客户名称")
+
+        # 2. 客户列表与管理
+        st.divider()
+        st.subheader("📋 客户清单")
+        try:
+            df_cust = pd.read_sql("SELECT name as 客户名称, phone as 电话, address as 地址, note as 备注 FROM customers ORDER BY name", engine)
+            if not df_cust.empty:
+                # 展示表格
+                st.dataframe(df_cust, width='stretch', hide_index=True)
+                
+                # 删除客户功能
+                with st.expander("🗑️ 客户档案维护（删除）"):
+                    del_target = st.selectbox("选择要移除的客户", ["-- 请选择 --"] + df_cust['客户名称'].tolist())
+                    if st.button("确认移除该客户"):
+                        if del_target != "-- 请选择 --":
+                            with engine.connect() as conn:
+                                conn.execute(text("DELETE FROM customers WHERE name = :n"), {"n": del_target})
+                                conn.commit()
+                            st.success(f"已移除客户：{del_target}")
+                            st.cache_data.clear()
+                            st.rerun()
+            else:
+                st.info("暂无客户信息，请通过上方表单添加。")
+        except Exception as e:
+            st.error(f"加载列表失败，可能需要升级数据库字段：{e}")
+
 
