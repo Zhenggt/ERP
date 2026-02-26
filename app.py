@@ -51,6 +51,11 @@ if check_password():
         
         try:
             df = load_inventory()
+            # 假设你在入库时录入了采购单价，或者我们在看板手动算
+            # 这里先展示基础库存卡片
+            total_kg = df['库存余量(公斤)'].sum()
+            st.columns(3)[0].metric("总仓储备 (公斤)", f"{total_kg:,.2f}")
+            st.dataframe(df, width='stretch', hide_index=True)
             if not df.empty:
                 st.dataframe(df, width='stretch', hide_index=True)
             else:
@@ -112,6 +117,12 @@ if check_password():
                     with col2:
                         num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01)
                         price = st.number_input("💰 销售单价", min_value=0.0, step=0.01)
+                        # --- 新增：实时金额计算展示 ---
+                        total_val = round(num * price, 2)
+                        if total_val > 0:
+                            st.info(f"💵 **本次合计金额：¥{total_val:,}**")
+                        else:
+                            st.write("请输入重量和单价以计算总额")
 
                     if st.form_submit_button("确认出库"):
                         # 精确匹配品名和规格查找库存
@@ -163,3 +174,4 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
