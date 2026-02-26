@@ -119,3 +119,81 @@ if check_password():
         except:
             st.error("数据加载失败。")
 
+
+# 在菜单 radio 中增加 "👥 客户管理"
+    st.sidebar.title("控制面板")
+    menu = st.sidebar.radio("功能切换", ["📊 实时库存", "📥 采购入库", "📤 销售出库", "👥 客户管理"])
+
+    # --- 新增模块：客户管理 ---
+    if menu == "👥 客户管理":
+        st.header("👥 客户信息档案")
+        
+        # 分为“新增客户”和“查看列表”两个标签页
+        tab1, tab2 = st.tabs(["➕ 新增客户", "📋 客户名册"])
+        
+        with tab1:
+            with st.form("add_customer", clear_on_submit=True):
+                c_name = st.text_input("客户名称（必填）")
+                c_phone = st.text_input("联系电话")
+                c_address = st.text_area("详细地址")
+                
+                if st.form_submit_button("保存客户信息"):
+                    if not c_name:
+                        st.error("客户名称不能为空")
+                    else:
+                        with engine.connect() as conn:
+                            conn.execute(
+                                text("INSERT INTO customers (name, phone, address) VALUES (:n, :p, :a) "
+                                     "ON CONFLICT (name) DO UPDATE SET phone = :p, address = :a"),
+                                {"n": c_name, "p": c_phone, "a": c_address}
+                            )
+                            conn.commit()
+                        st.success(f"✅ 客户 {c_name} 已保存")
+                        st.cache_data.clear()
+
+        with tab2:
+            @st.cache_data(ttl=60)
+            def fetch_customers():
+                return pd.read_sql("SELECT name as 客户名称, phone as 联系电话, address as 地址 FROM customers ORDER BY id DESC", engine)
+            
+            try:
+                df_c = fetch_customers()
+                st.dataframe(df_c, use_container_width=True, hide_index=True)
+            except:
+                st.info("尚无客户信息")
+
+    # --- 联动修改：在销售出库时选择客户 ---
+    elif menu == "📤 销售出库":
+        st.header("减少库存")
+        try:
+            # 同时读取产品和客户
+            df_p = pd.read_sql("SELECT name, stock FROM products WHERE stock > 0", engine)
+            df_cust = pd.read_sql("SELECT name FROM customers", engine)
+            
+            p_list = df_p['name'].tolist()
+            c_list = ["散客"] + df_cust['name'].tolist() # 默认有个散客选项
+            
+            if not p_list:
+                st.warning("暂无库存可售。")
+            else:
+                with st.form("out_form", clear_on_submit=True):
+                    target_c = st.selectbox("选择客户", c_list) # 改成下拉选择客户
+                    target_p = st.selectbox("选择货品", p_list)
+                    sale_num = st.number_input("销售数量", min_value=1, step=1)
+                    
+                    if st.form_submit_button("确认成交"):
+                        curr_stock = df_p[df_p['name'] == target_p]['stock'].values[0]
+                        if sale_num > curr_stock:
+                            st.error("库存不足")
+                        else:
+                            with engine.connect() as conn:
+                                conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p"),
+                                             {"n": sale_num, "p": target_p})
+                                conn.execute(text("INSERT INTO orders (type, customer, product, num) VALUES ('销售', :c, :p, :n)"),
+                                             {"c": target_c, "p": target_p, "n": sale_num})
+                                conn.commit()
+                            st.success(f"🚀 出库成功！客户：{target_c}")
+                            st.cache_data.clear()
+        except:
+            st.error("加载失败，请检查是否已创建 customers 表")
+
