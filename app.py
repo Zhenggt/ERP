@@ -116,7 +116,7 @@ if check_password():
                                 # B. 记流水
                                 conn.execute(
                                     text("""INSERT INTO orders (type, customer, product, num, price, total_amount) 
-                                            VALUES ('销售', :c, :p, :n, :pr, :t)"""),
+                                                VALUES ('销售', :c, :p, :n, :pr, :t)"""),
                                     {"c": target_c, "p": target_p, "n": num, "pr": price, "t": total}
                                 )
                                 conn.commit()
@@ -170,6 +170,7 @@ if check_password():
                     st.info("目前名册里还没有人，请在左边【新增客户】里添加。")
             except:
                 st.error("无法读取名册，请确认您已在 Supabase 运行了建表 SQL 代码。")
+
 
 
 
