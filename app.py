@@ -321,4 +321,72 @@ if check_password():
                     
         except Exception as e:
             st.error(f"客户模块加载异常: {e}")
+# --- H. 财务对账 ---
+    elif menu == "💰 财务对账":
+        st.header("💰 客户欠款与对账")
+        
+        # 1. 统计各个客户的未结清总额
+        query_unpaid = """
+            SELECT customer as 客户, SUM(total_amount) as 欠款总计 
+            FROM orders WHERE payment_status = 'unpaid' GROUP BY customer
+        """
+        df_summary = pd.read_sql(query_unpaid, engine)
+        
+        if not df_summary.empty:
+            st.subheader("📋 欠款汇总")
+            st.dataframe(df_summary, width='stretch', hide_index=True)
+            
+            st.divider()
+            st.subheader("📝 详细欠款明细")
+            # 查询详细欠款流水
+            df_detail = pd.read_sql("""
+                SELECT id, customer as 客户, product as 货品, num as 数量, total_amount as 金额, 
+                TO_CHAR(created_at, 'YYYY-MM-DD') as 日期 
+                FROM orders WHERE payment_status = 'unpaid' ORDER BY created_at DESC
+            """, engine)
+            st.dataframe(df_detail.drop(columns=['id']), width='stretch', hide_index=True)
+            
+            # 收款处理
+            with st.expander("💳 确认收款（销账）"):
+                target_id = st.selectbox("选择要结清的单号", 
+                                       df_detail.apply(lambda x: f"ID:{x['id']} | {x['客户']} | {x['金额']}元", axis=1).tolist())
+                if st.button("确认该笔款项已收到"):
+                    sid = int(target_id.split(" | ")[0].split(":")[1])
+                    with engine.connect() as conn:
+                        conn.execute(text("UPDATE orders SET payment_status = 'paid' WHERE id = :id"), {"id": sid})
+                        conn.commit()
+                    st.success("✅ 销账成功！")
+                    st.cache_data.clear()
+                    st.rerun()
+        else:
+            st.info("太棒了！目前没有任何客户欠款。")
 
+# --- I. 经营看板 ---
+    elif menu == "📈 经营看板":
+        st.header("📈 经营数据看板")
+        
+        # 1. 获取本月数据
+        month_query = """
+            SELECT 
+                SUM(CASE WHEN type = '销售' THEN total_amount ELSE 0 END) as 销售额,
+                SUM(CASE WHEN type = '销售' THEN (price - cost_price) * num ELSE 0 END) as 预估毛利,
+                COUNT(id) as 订单数
+            FROM orders 
+            WHERE created_at >= date_trunc('month', current_date)
+        """
+        df_stat = pd.read_sql(month_query, engine)
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("本月销售总额", f"¥ {df_stat['销售额'].iloc[0] or 0:,.2f}")
+        c2.metric("本月预估毛利", f"¥ {df_stat['预估毛利'].iloc[0] or 0:,.2f}", delta_color="normal")
+        c3.metric("本月成交单数", f"{int(df_stat['订单数'].iloc[0] or 0)} 单")
+
+        # 2. 简单的图表：每日销售趋势
+        st.subheader("📅 每日销售趋势")
+        df_trend = pd.read_sql("""
+            SELECT TO_CHAR(created_at, 'MM-DD') as 日期, SUM(total_amount) as 金额 
+            FROM orders WHERE type = '销售' 
+            GROUP BY 日期 ORDER BY 日期 LIMIT 15
+        """, engine)
+        if not df_trend.empty:
+            st.line_chart(df_trend.set_index('日期'))
