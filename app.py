@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
-from datetime import datetime
-
+from datetime import datetime, timedelta, timezone
+def get_beijing_time():
+    # 北京时间是 UTC+8
+    return datetime.now(timezone(timedelta(hours=8)))
 # --- 1. 配置与性能优化 ---
 st.set_page_config(page_title="铝业进销存系统 2026", layout="wide")
 
@@ -146,14 +148,17 @@ if check_password():
             st.error(f"运行异常: {e}")
 
    # --- D. 历史流水 ---
-    elif menu == "🧾 历史流水":
+   elif menu == "🧾 历史流水":
         st.header("🧾 进销存历史记录")
+        # 获取当前的北京日期
+        bj_now = get_beijing_time()
+        
         try:
-            # 1. 查询数据：将 UTC 转为北京时间 (Asia/Shanghai)
+            # 这里的 SQL 确保 created_at 被正确解释为北京时间
             query = """
                 SELECT 
-                    created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai' as raw_time,
-                    TO_CHAR(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') as 时间, 
+                    created_at AT TIME ZONE 'Asia/Shanghai' as raw_time,
+                    TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') as 时间, 
                     type as 类型, 
                     customer as 客户, 
                     product as 货品, 
@@ -166,20 +171,19 @@ if check_password():
             df_o = pd.read_sql(query, engine)
             
             if not df_o.empty:
-                # 确保时间列是日期格式，方便筛选
-                df_o['raw_time'] = pd.to_datetime(df_o['raw_time'])
+                df_o['raw_time'] = pd.to_datetime(df_o['raw_time']).dt.tz_localize(None) # 去除时区干扰对比
 
-                # --- 筛选功能区 ---
                 st.write("🔍 **数据筛选**")
                 c1, c2, c3 = st.columns([2, 1, 1])
                 
                 with c1:
-                    # 日期区间选择器
+                    # 默认显示北京时间今天的日期
                     date_range = st.date_input(
                         "选择日期范围",
-                        value=(datetime.now().date(), datetime.now().date()),
+                        value=(bj_now.date(), bj_now.date()),
                         help="选择开始和结束日期"
                     )
+                # ...（后续的筛选逻辑保持不变）...
                 with c2:
                     filter_type = st.selectbox("记录类型", ["全部", "销售", "进货"])
                 with c3:
@@ -242,5 +246,6 @@ if check_password():
                     conn.commit()
                 st.success("客户已保存")
                 st.cache_data.clear()
+
 
 
