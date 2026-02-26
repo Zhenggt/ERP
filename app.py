@@ -7,7 +7,6 @@ st.set_page_config(page_title="进销存系统", layout="wide")
 
 @st.cache_resource
 def get_engine():
-    """创建持久化数据库连接，提升响应速度"""
     try:
         return create_engine(st.secrets["db_uri"], pool_pre_ping=True, pool_recycle=3600)
     except Exception as e:
@@ -34,7 +33,6 @@ def check_password():
 
 # --- 3. 核心业务逻辑 ---
 if check_password():
-    # 侧边栏导航
     st.sidebar.title("🏮 系统菜单")
     menu = st.sidebar.radio("请选择操作", ["📊 库存看板", "📥 采购入库", "📤 销售出库", "👥 客户档案"])
     
@@ -42,12 +40,12 @@ if check_password():
         del st.session_state["password_correct"]
         st.rerun()
 
-   # --- A. 库存看板 ---
+    # --- A. 库存看板 ---
     if menu == "📊 库存看板":
         st.header("📈 实时库存报表 (单位：公斤)")
         @st.cache_data(ttl=10)
         def load_inventory():
-            # 关键修改点：将 '库存余量(公斤)' 改为 "库存余量(公斤)"
+            # 解决别名中括号引起的语法错误
             query = 'SELECT name as 品名, spec as 规格, stock as "库存余量(公斤)" FROM products ORDER BY stock DESC'
             return pd.read_sql(query, engine)
         
@@ -60,28 +58,35 @@ if check_password():
         except Exception as e:
             st.error(f"查询失败: {e}")
 
-   # --- B. 采购入库 ---
+    # --- B. 采购入库 ---
     elif menu == "📥 采购入库":
         st.header("📥 增加库存 (公斤)")
         with st.form("in_form", clear_on_submit=True):
-            name = st.text_input("货品名称")
-            spec = st.text_input("规格型号")
-            # 把 step 改成 0.1，方便输入半斤八两
-            num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
+            col1, col2 = st.columns(2)
+            with col1:
+                name = st.text_input("货品名称")
+                spec = st.text_input("规格型号")
+            with col2:
+                num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
+                in_price = st.number_input("采购单价 (元/公斤)", min_value=0.0, step=0.01)
             
             if st.form_submit_button("确认入库"):
-                # ... (后续数据库保存逻辑保持不变)
-                with engine.connect() as conn:
-                    # 更新库存：若品名存在则累加，不存在则插入
-                    conn.execute(text("INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) "
-                                      "ON CONFLICT (name) DO UPDATE SET stock = products.stock + :num"),
-                                 {"n": name, "s": spec, "num": num})
-                    conn.execute(text("INSERT INTO orders (type, product, num) VALUES ('进货', :p, :n)"),
-                                 {"p": name, "n": num})
-                    conn.commit()
-                st.success(f"✅ {name} 已入库")
-                st.cache_data.clear() # 清除缓存强制刷新数据
-    # --- C. 销售出库 ---     
+                if name:
+                    with engine.connect() as conn:
+                        # 更新库存
+                        conn.execute(text("INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) "
+                                          "ON CONFLICT (name) DO UPDATE SET stock = products.stock + :num"),
+                                     {"n": name, "s": spec, "num": num})
+                        # 记录流水（采购也记入流水，总额=数量*单价）
+                        conn.execute(text("INSERT INTO orders (type, product, num, price, total_amount) VALUES ('进货', :p, :n, :pr, :t)"),
+                                     {"p": name, "n": num, "pr": in_price, "t": num * in_price})
+                        conn.commit()
+                    st.success(f"✅ {name} {num}公斤 已入库")
+                    st.cache_data.clear()
+                else:
+                    st.error("请输入货品名称")
+
+    # --- C. 销售出库 ---
     elif menu == "📤 销售出库":
         st.header("📤 销售出库单 (单位：公斤)")
         try:
@@ -97,92 +102,57 @@ if check_password():
                         target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
                         target_p = st.selectbox("📦 选择货品", df_p['name'].tolist())
                     with col2:
-                        # 支持小数录入，例如 1.5 公斤
                         num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01, format="%.2f")
                         price = st.number_input("💰 销售单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
                     
                     total = num * price
                     st.info(f"💡 合计：{num} 公斤 × {price} 元/公斤 = ￥{total:,.2f}")
                     
-                    # --- 注意下面这行的对齐情况 ---
-                    submit = st.form_submit_button("确认出库并扣减库存")
-                    
-                    if submit:
+                    if st.form_submit_button("确认出库并扣减库存"):
                         current_stock = float(df_p[df_p['name'] == target_p]['stock'].values[0])
                         if num > current_stock:
-                            st.error(f"❌ 库存不足！{target_p} 仅剩 {current_stock} 公斤")
+                            st.error(f"❌ 库存不足！仅剩 {current_stock} 公斤")
                         elif num <= 0:
                             st.error("❌ 出库重量必须大于 0")
                         else:
                             with engine.connect() as conn:
-                                # A. 减库存
-                                conn.execute(
-                                    text("UPDATE products SET stock = stock - :n WHERE name = :p"),
-                                    {"n": num, "p": target_p}
-                                )
-                                # B. 记流水
-                                conn.execute(
-                                    text("""INSERT INTO orders (type, customer, product, num, price, total_amount) 
+                                conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p"),
+                                             {"n": num, "p": target_p})
+                                conn.execute(text("""INSERT INTO orders (type, customer, product, num, price, total_amount) 
                                                 VALUES ('销售', :c, :p, :n, :pr, :t)"""),
-                                    {"c": target_c, "p": target_p, "n": num, "pr": price, "t": total}
-                                )
+                                             {"c": target_c, "p": target_p, "n": num, "pr": price, "t": total})
                                 conn.commit()
                             st.success(f"🚀 出库成功！{target_p} 减少 {num} 公斤")
                             st.cache_data.clear()
         except Exception as e:
             st.error(f"出库模块运行异常: {e}")
-# --- D. 客户档案 ---
+
+    # --- D. 客户档案 ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息档案")
-        
-        # 建立两个页签：录入和查看
         tab1, tab2 = st.tabs(["➕ 新增客户", "📋 客户名册"])
-        
         with tab1:
-            st.subheader("填写客户资料")
-            # 这里的 clear_on_submit=True 会在点保存后清空输入框，方便录下一个
             with st.form("customer_form", clear_on_submit=True):
                 c_name = st.text_input("客户姓名/公司名 (必填)")
                 c_phone = st.text_input("联系电话")
                 c_address = st.text_area("收货地址")
-                
-                submit_c = st.form_submit_button("💾 点击保存到云端")
-                
-                if submit_c:
-                    if not c_name:
-                        st.error("❌ 客户名称是必填项，不能留空。")
-                    else:
+                if st.form_submit_button("💾 点击保存到云端"):
+                    if c_name:
                         try:
                             with engine.connect() as conn:
-                                # 使用 UPSERT 逻辑：如果名字重复就更新电话地址，不重复就新增
-                                conn.execute(
-                                    text("INSERT INTO customers (name, phone, address) VALUES (:n, :p, :a) "
-                                         "ON CONFLICT (name) DO UPDATE SET phone = :p, address = :a"),
-                                    {"n": c_name, "p": c_phone, "a": c_address}
-                                )
+                                conn.execute(text("INSERT INTO customers (name, phone, address) VALUES (:n, :p, :a) "
+                                                  "ON CONFLICT (name) DO UPDATE SET phone = :p, address = :a"),
+                                             {"n": c_name, "p": c_phone, "a": c_address})
                                 conn.commit()
-                            st.success(f"✅ 客户【{c_name}】已成功存入系统！")
-                            st.cache_data.clear() # 存完立刻刷新缓存，确保名册能看到
+                            st.success(f"✅ 客户【{c_name}】资料已同步")
+                            st.cache_data.clear()
                         except Exception as e:
-                            st.error(f"保存失败，请检查数据库。报错详情: {e}")
-
+                            st.error(f"保存失败: {e}")
+                    else:
+                        st.error("❌ 名称不能为空")
         with tab2:
-            st.subheader("所有客户清单")
             try:
-                # 从数据库读取数据显示出来
                 df_cust = pd.read_sql("SELECT name as 客户名称, phone as 联系电话, address as 地址 FROM customers ORDER BY id DESC", engine)
-                if not df_cust.empty:
-                    st.dataframe(df_cust, use_container_width=True, hide_index=True)
-                else:
-                    st.info("目前名册里还没有人，请在左边【新增客户】里添加。")
+                st.dataframe(df_cust, use_container_width=True, hide_index=True)
             except:
-                st.error("无法读取名册，请确认您已在 Supabase 运行了建表 SQL 代码。")
-
-
-
-
-
-
-
-
-
+                st.info("暂无客户资料")
