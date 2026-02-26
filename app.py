@@ -2,16 +2,25 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta, timezone
+
+# --- 1. 配置与北京时间获取 ---
+st.set_page_config(page_title="铝业进销存系统", layout="wide")
+
 def get_beijing_time():
-    # 北京时间是 UTC+8
-    return datetime.now(timezone(timedelta(hours=8)))
-# --- 1. 配置与性能优化 ---
-st.set_page_config(page_title="铝业进销存系统 2026", layout="wide")
+    # 强制获取北京时间 UTC+8
+    beijing_tz = timezone(timedelta(hours=8))
+    return datetime.now(beijing_tz)
 
 @st.cache_resource
 def get_engine():
     try:
-        return create_engine(st.secrets["db_uri"], pool_pre_ping=True, pool_recycle=3600)
+        # 强制数据库会话也使用北京时区
+        return create_engine(
+            st.secrets["db_uri"], 
+            pool_pre_ping=True, 
+            pool_recycle=3600,
+            connect_args={"options": "-c timezone=Asia/Shanghai"}
+        )
     except Exception as e:
         st.error(f"数据库连接失败: {e}")
         return None
@@ -83,7 +92,7 @@ if check_password():
                             INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) 
                             ON CONFLICT (name, spec) DO UPDATE SET stock = products.stock + :num
                         """), {"n": name, "s": spec, "num": num})
-                        # 入库也记一笔流水
+                        # 入库流水记录
                         conn.execute(text("""
                             INSERT INTO orders (type, customer, product, num, price, total_amount) 
                             VALUES ('进货', '供应商', :p, :n, :pr, :t)
@@ -119,7 +128,7 @@ if check_password():
 
                 total_val = round(num * price, 2)
                 
-                # 金额大屏显示
+                # 金额实时跳动大屏
                 st.markdown(f"""
                 <div style="background-color:#1e293b; padding:20px; border-radius:15px; text-align:center; border: 2px solid #3b82f6; margin: 15px 0;">
                     <p style="color:#cbd5e1; font-size:14px; margin:0;">本次合计金额</p>
@@ -147,105 +156,63 @@ if check_password():
         except Exception as e:
             st.error(f"运行异常: {e}")
 
-   # --- D. 历史流水 ---
-   elif menu == "🧾 历史流水":
-        st.header("🧾 进销存历史记录")
-        # 获取当前的北京日期
+    # --- D. 历史流水 ---
+    elif menu == "🧾 历史流水":
+        st.header("🧾 历史交易记录")
         bj_now = get_beijing_time()
-        
         try:
-            # 这里的 SQL 确保 created_at 被正确解释为北京时间
+            # SQL 中将时间转为上海时区
             query = """
                 SELECT 
                     created_at AT TIME ZONE 'Asia/Shanghai' as raw_time,
                     TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') as 时间, 
-                    type as 类型, 
-                    customer as 客户, 
-                    product as 货品, 
-                    num as 数量, 
-                    price as 单价, 
-                    total_amount as 总计 
-                FROM orders 
-                ORDER BY created_at DESC
+                    type as 类型, customer as 客户, product as 货品, 
+                    num as 数量, price as 单价, total_amount as 总计 
+                FROM orders ORDER BY created_at DESC
             """
             df_o = pd.read_sql(query, engine)
             
             if not df_o.empty:
-                df_o['raw_time'] = pd.to_datetime(df_o['raw_time']).dt.tz_localize(None) # 去除时区干扰对比
+                df_o['raw_time'] = pd.to_datetime(df_o['raw_time']).dt.tz_localize(None)
 
                 st.write("🔍 **数据筛选**")
                 c1, c2, c3 = st.columns([2, 1, 1])
-                
                 with c1:
-                    # 默认显示北京时间今天的日期
-                    date_range = st.date_input(
-                        "选择日期范围",
-                        value=(bj_now.date(), bj_now.date()),
-                        help="选择开始和结束日期"
-                    )
-                # ...（后续的筛选逻辑保持不变）...
+                    date_range = st.date_input("日期范围", value=(bj_now.date(), bj_now.date()))
                 with c2:
                     filter_type = st.selectbox("记录类型", ["全部", "销售", "进货"])
                 with c3:
                     search_query = st.text_input("货品搜索", "")
 
-                # --- 执行过滤逻辑 ---
-                filtered_df = df_o.copy()
-
-                # 1. 日期过滤 (需处理用户只选了一个日期的情况)
+                # 筛选过滤
+                f_df = df_o.copy()
                 if isinstance(date_range, tuple) and len(date_range) == 2:
-                    start_date, end_date = date_range
-                    # 将 pandas 的时间列转为 date 类型对比
-                    filtered_df = filtered_df[
-                        (filtered_df['raw_time'].dt.date >= start_date) & 
-                        (filtered_df['raw_time'].dt.date <= end_date)
-                    ]
-
-                # 2. 类型过滤
+                    f_df = f_df[(f_df['raw_time'].dt.date >= date_range[0]) & (f_df['raw_time'].dt.date <= date_range[1])]
                 if filter_type != "全部":
-                    filtered_df = filtered_df[filtered_df['类型'] == filter_type]
-
-                # 3. 关键词过滤
+                    f_df = f_df[f_df['类型'] == filter_type]
                 if search_query:
-                    filtered_df = filtered_df[filtered_df['货品'].str.contains(search_query, case=False, na=False)]
+                    f_df = f_df[f_df['货品'].str.contains(search_query, case=False, na=False)]
 
-                # --- 展示与导出 ---
-                # 隐藏掉辅助用的 raw_time 列再显示
-                display_df = filtered_df.drop(columns=['raw_time'])
-                
                 st.divider()
-                st.subheader(f"📊 查询结果 (共 {len(display_df)} 条)")
+                st.info(f"💰 选定范围内合计金额：**¥ {f_df['总计'].sum():,.2f}**")
+                st.dataframe(f_df.drop(columns=['raw_time']), width='stretch', hide_index=True)
                 
-                # 计算当前筛选结果的总金额
-                total_sum = display_df['总计'].sum()
-                st.info(f"💰 选定范围内合计金额：**¥ {total_sum:,.2f}**")
-                
-                st.dataframe(display_df, width='stretch', hide_index=True)
-                
-                # 导出按钮
-                csv = display_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 导出筛选结果为 Excel CSV",
-                    data=csv,
-                    file_name=f"流水_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime='text/csv'
-                )
+                csv = f_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("📥 导出当前报表", data=csv, file_name="history.csv")
             else:
                 st.info("暂无交易记录")
         except Exception as e:
-            st.error(f"查询失败: {e}")
+            st.error(f"查询流水失败: {e}")
 
     # --- E. 客户档案 ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息档案")
-        c_name = st.text_input("新增客户名")
-        if st.button("保存客户"):
-            if c_name:
-                with engine.connect() as conn:
-                    conn.execute(text("INSERT INTO customers (name) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": c_name})
-                    conn.commit()
-                st.success("客户已保存")
-                st.cache_data.clear()
-
-
-
+        with st.form("cust_form", clear_on_submit=True):
+            c_name = st.text_input("客户名称")
+            if st.form_submit_button("保存客户"):
+                if c_name:
+                    with engine.connect() as conn:
+                        conn.execute(text("INSERT INTO customers (name) VALUES (:n) ON CONFLICT DO NOTHING"), {"n": c_name})
+                        conn.commit()
+                    st.success(f"客户 {c_name} 已保存")
+                    st.cache_data.clear()
