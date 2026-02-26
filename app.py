@@ -39,12 +39,12 @@ if check_password():
     if st.sidebar.button("退出登录"):
         del st.session_state["password_correct"]
         st.rerun()
- # --- A. 库存看板 ---
+# --- A. 库存看板 ---
     if menu == "📊 库存看板":
         st.header("📈 实时库存报表 (单位：公斤)")
         @st.cache_data(ttl=10)
         def load_inventory():
-            # 按品名和规格排序，方便查找
+            # 按品名和规格排序
             query = 'SELECT name as 品名, spec as 规格, stock as "库存余量(公斤)" FROM products ORDER BY name, spec ASC'
             return pd.read_sql(query, engine)
         
@@ -56,8 +56,8 @@ if check_password():
                 total_kg = df['库存余量(公斤)'].sum()
                 st.metric("总仓储备 (公斤)", f"{total_kg:,.2f}")
                 
-                # 2. 只保留这一个表格展示命令
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                # 2. 修正后的表格展示：使用 width='stretch' 撑满屏幕
+                st.dataframe(df, width='stretch', hide_index=True)
             else:
                 st.info("目前库存为空，请先录入采购信息。")
         except Exception as e:
@@ -185,6 +185,7 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
 
 
 
