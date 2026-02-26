@@ -45,14 +45,14 @@ if check_password():
         st.header("📈 实时库存报表 (单位：公斤)")
         @st.cache_data(ttl=10)
         def load_inventory():
-            # 解决别名中括号引起的语法错误
             query = 'SELECT name as 品名, spec as 规格, stock as "库存余量(公斤)" FROM products ORDER BY stock DESC'
             return pd.read_sql(query, engine)
         
         try:
             df = load_inventory()
             if not df.empty:
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                # 适配 2026 年新语法：width='stretch'
+                st.dataframe(df, width='stretch', hide_index=True)
             else:
                 st.info("目前库存为空，请先录入采购信息。")
         except Exception as e:
@@ -73,11 +73,9 @@ if check_password():
             if st.form_submit_button("确认入库"):
                 if name:
                     with engine.connect() as conn:
-                        # 更新库存
                         conn.execute(text("INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) "
                                           "ON CONFLICT (name) DO UPDATE SET stock = products.stock + :num"),
                                      {"n": name, "s": spec, "num": num})
-                        # 记录流水（采购也记入流水，总额=数量*单价）
                         conn.execute(text("INSERT INTO orders (type, product, num, price, total_amount) VALUES ('进货', :p, :n, :pr, :t)"),
                                      {"p": name, "n": num, "pr": in_price, "t": num * in_price})
                         conn.commit()
@@ -153,6 +151,7 @@ if check_password():
         with tab2:
             try:
                 df_cust = pd.read_sql("SELECT name as 客户名称, phone as 联系电话, address as 地址 FROM customers ORDER BY id DESC", engine)
-                st.dataframe(df_cust, use_container_width=True, hide_index=True)
+                # 适配 2026 年新语法：width='stretch'
+                st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
-                st.info("暂无客户资料")
+                st.info("暂无客户资料数据")
