@@ -70,7 +70,7 @@ if check_password():
                     conn.commit()
                 st.success(f"✅ {name} 已入库")
                 st.cache_data.clear() # 清除缓存强制刷新数据
-
+     # --- C. 销售出库 ---
     elif menu == "📤 销售出库":
         st.header("销售出库单")
         try:
@@ -100,4 +100,50 @@ if check_password():
                             st.cache_data.clear()
         except Exception as e:
             st.error(f"加载失败: {e}")
+# --- D. 客户档案 ---
+    elif menu == "👥 客户档案":
+        st.header("👥 客户信息档案")
+        
+        # 建立两个页签：录入和查看
+        tab1, tab2 = st.tabs(["➕ 新增客户", "📋 客户名册"])
+        
+        with tab1:
+            st.subheader("填写客户资料")
+            # 这里的 clear_on_submit=True 会在点保存后清空输入框，方便录下一个
+            with st.form("customer_form", clear_on_submit=True):
+                c_name = st.text_input("客户姓名/公司名 (必填)")
+                c_phone = st.text_input("联系电话")
+                c_address = st.text_area("收货地址")
+                
+                submit_c = st.form_submit_button("💾 点击保存到云端")
+                
+                if submit_c:
+                    if not c_name:
+                        st.error("❌ 客户名称是必填项，不能留空。")
+                    else:
+                        try:
+                            with engine.connect() as conn:
+                                # 使用 UPSERT 逻辑：如果名字重复就更新电话地址，不重复就新增
+                                conn.execute(
+                                    text("INSERT INTO customers (name, phone, address) VALUES (:n, :p, :a) "
+                                         "ON CONFLICT (name) DO UPDATE SET phone = :p, address = :a"),
+                                    {"n": c_name, "p": c_phone, "a": c_address}
+                                )
+                                conn.commit()
+                            st.success(f"✅ 客户【{c_name}】已成功存入系统！")
+                            st.cache_data.clear() # 存完立刻刷新缓存，确保名册能看到
+                        except Exception as e:
+                            st.error(f"保存失败，请检查数据库。报错详情: {e}")
+
+        with tab2:
+            st.subheader("所有客户清单")
+            try:
+                # 从数据库读取数据显示出来
+                df_cust = pd.read_sql("SELECT name as 客户名称, phone as 联系电话, address as 地址 FROM customers ORDER BY id DESC", engine)
+                if not df_cust.empty:
+                    st.dataframe(df_cust, use_container_width=True, hide_index=True)
+                else:
+                    st.info("目前名册里还没有人，请在左边【新增客户】里添加。")
+            except:
+                st.error("无法读取名册，请确认您已在 Supabase 运行了建表 SQL 代码。")
 
