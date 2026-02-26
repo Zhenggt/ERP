@@ -156,14 +156,15 @@ if check_password():
         except Exception as e:
             st.error(f"运行异常: {e}")
 
-    # --- D. 历史流水 ---
+   # --- D. 历史流水 ---
     elif menu == "🧾 历史流水":
         st.header("🧾 历史交易记录")
         bj_now = get_beijing_time()
         try:
-            # SQL 中将时间转为上海时区
+            # SQL 中查询原始 ID 以便删除
             query = """
                 SELECT 
+                    id,
                     created_at AT TIME ZONE 'Asia/Shanghai' as raw_time,
                     TO_CHAR(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') as 时间, 
                     type as 类型, customer as 客户, product as 货品, 
@@ -175,6 +176,7 @@ if check_password():
             if not df_o.empty:
                 df_o['raw_time'] = pd.to_datetime(df_o['raw_time']).dt.tz_localize(None)
 
+                # --- 筛选过滤区 ---
                 st.write("🔍 **数据筛选**")
                 c1, c2, c3 = st.columns([2, 1, 1])
                 with c1:
@@ -184,7 +186,6 @@ if check_password():
                 with c3:
                     search_query = st.text_input("货品搜索", "")
 
-                # 筛选过滤
                 f_df = df_o.copy()
                 if isinstance(date_range, tuple) and len(date_range) == 2:
                     f_df = f_df[(f_df['raw_time'].dt.date >= date_range[0]) & (f_df['raw_time'].dt.date <= date_range[1])]
@@ -195,15 +196,57 @@ if check_password():
 
                 st.divider()
                 st.info(f"💰 选定范围内合计金额：**¥ {f_df['总计'].sum():,.2f}**")
-                st.dataframe(f_df.drop(columns=['raw_time']), width='stretch', hide_index=True)
                 
-                csv = f_df.to_csv(index=False).encode('utf-8-sig')
+                # 展示表格（隐藏 ID 列和原始时间列）
+                display_df = f_df.drop(columns=['id', 'raw_time'])
+                st.dataframe(display_df, width='stretch', hide_index=True)
+                
+                # --- 🛠️ 记录管理（撤销功能） ---
+                st.subheader("🛠️ 记录管理")
+                with st.expander("点击展开管理选项（可撤销错误记录）"):
+                    st.warning("注意：撤销“销售”记录会自动回补库存，撤销“进货”记录会扣减库存。")
+                    # 让用户选择要撤销的记录 ID（显示品名和时间供辨认）
+                    undo_options = f_df.apply(lambda x: f"ID:{x['id']} | {x['时间']} | {x['货品']} | {x['数量']}kg", axis=1).tolist()
+                    target_undo = st.selectbox("选择要作废的记录", ["-- 请选择 --"] + undo_options)
+                    
+                    if st.button("❌ 确认作废并回滚库存"):
+                        if target_undo != "-- 请选择 --":
+                            # 提取选中的 ID
+                            selected_id = int(target_undo.split(" | ")[0].split(":")[1])
+                            record = f_df[f_df['id'] == selected_id].iloc[0]
+                            
+                            # 解析品名和规格（从 "品名 | 规格" 中拆分）
+                            p_info = record['货品'].split(" | ")
+                            p_name = p_info[0]
+                            p_spec = p_info[1] if len(p_info) > 1 else ""
+                            p_num = record['数量']
+                            p_type = record['类型']
+
+                            with engine.connect() as conn:
+                                # 1. 回滚库存
+                                if p_type == "销售":
+                                    # 销售撤销 = 库存增加
+                                    conn.execute(text("UPDATE products SET stock = stock + :n WHERE name = :p AND spec = :s"),
+                                                 {"n": p_num, "p": p_name, "s": p_spec})
+                                elif p_type == "进货":
+                                    # 进货撤销 = 库存减少
+                                    conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"),
+                                                 {"n": p_num, "p": p_name, "s": p_spec})
+                                
+                                # 2. 删除流水记录
+                                conn.execute(text("DELETE FROM orders WHERE id = :id"), {"id": selected_id})
+                                conn.commit()
+                            
+                            st.success(f"✅ 记录 {selected_id} 已作废，库存已回滚！")
+                            st.cache_data.clear()
+                            st.rerun() # 刷新页面看效果
+                
+                csv = display_df.to_csv(index=False).encode('utf-8-sig')
                 st.download_button("📥 导出当前报表", data=csv, file_name="history.csv")
             else:
                 st.info("暂无交易记录")
         except Exception as e:
             st.error(f"查询流水失败: {e}")
-
     # --- E. 客户档案 ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息档案")
@@ -216,3 +259,4 @@ if check_password():
                         conn.commit()
                     st.success(f"客户 {c_name} 已保存")
                     st.cache_data.clear()
+
