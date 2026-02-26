@@ -45,14 +45,13 @@ if check_password():
         st.header("📈 实时库存报表 (单位：公斤)")
         @st.cache_data(ttl=10)
         def load_inventory():
-            # 修改后的看板查询
+            # 按品名和规格排序，方便查找
             query = 'SELECT name as 品名, spec as 规格, stock as "库存余量(公斤)" FROM products ORDER BY name, spec ASC'
             return pd.read_sql(query, engine)
         
         try:
             df = load_inventory()
             if not df.empty:
-                # 适配 2026 年新语法：width='stretch'
                 st.dataframe(df, width='stretch', hide_index=True)
             else:
                 st.info("目前库存为空，请先录入采购信息。")
@@ -71,11 +70,10 @@ if check_password():
                 num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
                 in_price = st.number_input("采购单价 (元/公斤)", min_value=0.0, step=0.01)
             
-            # --- 注意！这行一定要和上面的 col1, col2 垂直对齐 ---
             if st.form_submit_button("确认入库"):
                 if name:
                     with engine.connect() as conn:
-                        # 数据库执行部分再向右缩进一次
+                        # 使用 (name, spec) 作为唯一判断标准
                         conn.execute(text("""
                             INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) 
                             ON CONFLICT (name, spec) 
@@ -88,49 +86,53 @@ if check_password():
                     st.error("请输入货品名称")
 
     # --- C. 销售出库 ---
-   elif menu == "📤 销售出库":
+    elif menu == "📤 销售出库":
         st.header("📤 销售出库单 (单位：公斤)")
         try:
-            # 修改点：同时读取品名和规格
             df_p = pd.read_sql("SELECT name, spec, stock FROM products WHERE stock > 0", engine)
             df_c = pd.read_sql("SELECT name FROM customers", engine)
+            
             if df_p.empty:
                 st.warning("仓库目前无货。")
             else:
-                # 关键：将品名和规格合并为一个可选项
+                # 合并显示，防止选错型号
                 df_p['display_name'] = df_p['name'] + " | " + df_p['spec'].fillna("无规格")
+                
                 with st.form("out_form", clear_on_submit=True):
                     col1, col2 = st.columns(2)
                     with col1:
                         target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
-                        # 用户现在选的是“铝棒 | 5051”
                         selected_option = st.selectbox("📦 选择货品 (品名 | 规格)", df_p['display_name'].tolist())
-                    # 根据选择的内容，反向拆分出品名和规格
+                    
+                    # 拆分选择的品名和规格
                     target_p = selected_option.split(" | ")[0]
                     target_s = selected_option.split(" | ")[1]
                     if target_s == "无规格": target_s = ""
+
                     with col2:
                         num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01)
                         price = st.number_input("💰 销售单价", min_value=0.0, step=0.01)
+
                     if st.form_submit_button("确认出库"):
-                        # 查找对应的库存数值（匹配品名和规格）
+                        # 精确匹配品名和规格查找库存
                         current_row = df_p[(df_p['name'] == target_p) & (df_p['spec'] == target_s)]
                         current_stock = float(current_row['stock'].values[0])
+                        
                         if num > current_stock:
                             st.error(f"库存不足！当前仅剩 {current_stock} 公斤")
                         else:
                             with engine.connect() as conn:
-                                # 减库存时，必须同时匹配 name 和 spec
+                                # 扣减库存时同时匹配品名和规格
                                 conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"),
                                              {"n": num, "p": target_p, "s": target_s})
-                                # 记流水
+                                # 记录流水
                                 conn.execute(text("INSERT INTO orders (type, customer, product, num, price, total_amount) VALUES ('销售', :c, :p, :n, :pr, :t)"),
                                              {"c": target_c, "p": selected_option, "n": num, "pr": price, "t": num * price})
                                 conn.commit()
                             st.success(f"🚀 {selected_option} 出库成功！")
                             st.cache_data.clear()
         except Exception as e:
-            st.error(f"出错: {e}")
+            st.error(f"模块运行异常: {e}")
 
     # --- D. 客户档案 ---
     elif menu == "👥 客户档案":
@@ -158,12 +160,6 @@ if check_password():
         with tab2:
             try:
                 df_cust = pd.read_sql("SELECT name as 客户名称, phone as 联系电话, address as 地址 FROM customers ORDER BY id DESC", engine)
-                # 适配 2026 年新语法：width='stretch'
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
-
-
-
-
-
