@@ -149,14 +149,46 @@ if check_password():
     elif menu == "🧾 历史流水":
         st.header("🧾 进销存历史记录")
         try:
+            # 1. 查询数据：AT TIME ZONE 将 UTC 转为北京时间
             query = """
-                SELECT created_at as 时间, type as 类型, customer as 客户, 
-                       product as 货品, num as 数量, price as 单价, total_amount as 总计 
-                FROM orders ORDER BY created_at DESC
+                SELECT 
+                    TO_CHAR(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') as 时间, 
+                    type as 类型, 
+                    customer as 客户, 
+                    product as 货品, 
+                    num as 数量, 
+                    price as 单价, 
+                    total_amount as 总计 
+                FROM orders 
+                ORDER BY created_at DESC
             """
             df_o = pd.read_sql(query, engine)
+            
             if not df_o.empty:
-                st.dataframe(df_o, width='stretch', hide_index=True)
+                # --- 2. 筛选功能栏 ---
+                col1, col2 = st.columns(2)
+                with col1:
+                    # 按货品搜索
+                    search_query = st.text_input("🔍 按货品或规格搜索", "")
+                with col2:
+                    # 按类型筛选 (全部/销售/进货)
+                    filter_type = st.selectbox("📅 记录类型", ["全部", "销售", "进货"])
+
+                # --- 3. 执行过滤逻辑 ---
+                filtered_df = df_o.copy()
+                if search_query:
+                    filtered_df = filtered_df[filtered_df['货品'].str.contains(search_query, case=False, na=False)]
+                
+                if filter_type != "全部":
+                    filtered_df = filtered_df[filtered_df['类型'] == filter_type]
+
+                # --- 4. 展示筛选后的结果 ---
+                st.write(f"共找到 {len(filtered_df)} 条记录")
+                st.dataframe(filtered_df, width='stretch', hide_index=True)
+                
+                # 可选：导出按钮
+                csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button("📥 下载当前报表 (Excel可开)", data=csv, file_name=f"流水_{datetime.now().strftime('%Y%m%d')}.csv")
             else:
                 st.info("暂无交易记录")
         except Exception as e:
@@ -173,3 +205,4 @@ if check_password():
                     conn.commit()
                 st.success("客户已保存")
                 st.cache_data.clear()
+
