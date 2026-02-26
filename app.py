@@ -74,42 +74,149 @@ if check_password():
                     st.cache_data.clear()
 
     # --- C. 销售出库 ---
+    # --- C. 销售出库 ---
     elif menu == "📤 销售出库":
         st.header("📤 销售出库单")
         try:
+            # 获取库存和客户数据
             df_p = pd.read_sql("SELECT name, spec, stock FROM products WHERE stock > 0", engine)
             df_c = pd.read_sql("SELECT name, phone, address FROM customers", engine)
-            if not df_p.empty:
-                df_p['display'] = df_p['name'] + " | " + df_p['spec'].fillna("")
+            
+            if df_p.empty:
+                st.warning("仓库目前无货。")
+            else:
+                # 格式化货品显示名称
+                df_p['display'] = df_p['name'] + " | " + df_p['spec'].fillna("标准")
+                
                 col1, col2 = st.columns(2)
                 with col1:
+                    # 客户选择与详情显示
                     t_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
+                    c_info = {"phone": "未登记", "address": "自提/无地址"} # 默认值
                     if t_c != "散客":
-                        c_info = df_c[df_c['name'] == t_c].iloc[0]
-                        st.caption(f"📞 {c_info['phone'] or '无电话'} | 📍 {c_info['address'] or '无地址'}")
+                        res = df_c[df_c['name'] == t_c].iloc[0]
+                        c_info['phone'] = res['phone'] if res['phone'] else "未登记"
+                        c_info['address'] = res['address'] if res['address'] else "无地址"
+                        st.caption(f"📞 {c_info['phone']} | 📍 {c_info['address']}")
+                    
                     s_o = st.selectbox("📦 选择货品", df_p['display'].tolist())
-                with col2:
-                    num = st.number_input("⚖️ 出库重量", min_value=0.0)
-                    price = st.number_input("💰 销售单价", min_value=0.0)
                 
-                total = round(num * price, 2)
-                st.markdown(f'<div style="background:#1e293b;padding:20px;border-radius:10px;text-align:center;border:1px solid #3b82f6;"><p style="color:#cbd5e1;margin:0;">合计金额</p><p style="color:#3b82f6;font-size:32px;font-weight:bold;margin:0;">¥ {total:,.2f}</p></div>', unsafe_allow_html=True)
-                
-                if st.button("确认提交并扣减库存", use_container_width=True):
-                    stock_now = float(df_p[df_p['display'] == s_o]['stock'].values[0])
-                    if num > stock_now: st.error("库存不足")
-                    elif num <= 0: st.error("请输入重量")
-                    else:
-                        p_n, p_s = s_o.split(" | ")[0], s_o.split(" | ")[1]
-                        with engine.connect() as conn:
-                            conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), {"n": num, "p": p_n, "s": p_s})
-                            conn.execute(text("INSERT INTO orders (type, customer, product, num, price, total_amount) VALUES ('销售', :c, :p, :n, :pr, :t)"), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total})
-                            conn.commit()
-                        st.success("出库成功")
-                        st.cache_data.clear()
-        except Exception as e:
-            st.error(f"运行异常: {e}")
+                # 拆分品名和规格
+                p_n = s_o.split(" | ")[0]
+                p_s = s_o.split(" | ")[1]
 
+                with col2:
+                    num = st.number_input("⚖️ 出库重量 (kg)", min_value=0.0, step=0.01)
+                    price = st.number_input("💰 销售单价 (元)", min_value=0.0, step=0.01)
+
+                total = round(num * price, 2)
+                
+                # 金额汇总显示
+                st.markdown(f"""
+                <div style="background:#1e293b;padding:15px;border-radius:10px;text-align:center;border:1px solid #3b82f6;margin:10px 0;">
+                    <p style="color:#cbd5e1;margin:0;font-size:14px;">合计金额</p>
+                    <p style="color:#3b82f6;font-size:32px;font-weight:bold;margin:0;">¥ {total:,.2f}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if st.button("🚀 确认提交并生成三联单", use_container_width=True):
+                    # 检查库存
+                    stock_now = float(df_p[df_p['display'] == s_o]['stock'].values[0])
+                    if num > stock_now:
+                        st.error(f"库存不足！当前余量：{stock_now} kg")
+                    elif num <= 0:
+                        st.error("请输入有效重量")
+                    else:
+                        # 数据库操作
+                        with engine.connect() as conn:
+                            conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), 
+                                         {"n": num, "p": p_n, "s": p_s})
+                            conn.execute(text("""
+                                INSERT INTO orders (type, customer, product, num, price, total_amount) 
+                                VALUES ('销售', :c, :p, :n, :pr, :t)
+                            """), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total})
+                            conn.commit()
+                        
+                        st.success("✅ 出库成功！单据生成如下：")
+                        st.cache_data.clear()
+
+                        # --- 三联单 HTML 打印模板 ---
+                        bill_html = f"""
+                        <style>
+                            .bill-box {{
+                                width: 185mm; 
+                                padding: 10mm; 
+                                border: 1px dashed #666;
+                                font-family: 'SimSun', 'STSong', serif;
+                                color: #000;
+                                background: #fff;
+                            }}
+                            .title {{ text-align: center; font-size: 22px; font-weight: bold; letter-spacing: 4px; margin-bottom: 10px; }}
+                            .info-table {{ width: 100%; font-size: 13px; margin-bottom: 5px; }}
+                            .data-table {{ width: 100%; border-collapse: collapse; border: 1.5px solid #000; }}
+                            .data-table th, .data-table td {{ border: 1px solid #000; padding: 6px; text-align: center; font-size: 13px; }}
+                            .footer {{ width: 100%; margin-top: 15px; font-size: 13px; display: flex; justify-content: space-between; }}
+                            @media print {{
+                                .no-print {{ display: none !important; }}
+                                @page {{ size: 241mm 140mm; margin: 0; }}
+                            }}
+                        </style>
+
+                        <div class="bill-box" id="bill">
+                            <div class="title">销售出库单</div>
+                            <table class="info-table">
+                                <tr>
+                                    <td><strong>收货单位:</strong> {t_c}</td>
+                                    <td style="text-align:right;"><strong>日期:</strong> {get_beijing_time().strftime('%Y-%m-%d %H:%M')}</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2"><strong>联系信息:</strong> {c_info['phone']} | {c_info['address']}</td>
+                                </tr>
+                            </table>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>货品名称</th><th>规格型号</th><th>数量(kg)</th><th>单价(元)</th><th>金额(元)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr style="height:40px;">
+                                        <td>{p_n}</td><td>{p_s}</td><td>{num}</td><td>{price}</td><td>{total}</td>
+                                    </tr>
+                                    <tr style="height:30px;">
+                                        <td>备注</td><td colspan="4"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <div class="footer">
+                                <span>制单人: 管理员</span>
+                                <span>送货人签字: _________</span>
+                                <span>收货人签字: _________________</span>
+                            </div>
+                        </div>
+
+                        <button class="no-print" onclick="printBill()" style="margin-top:15px; padding:10px 25px; background:#2563eb; color:white; border:none; border-radius:5px; cursor:pointer;">
+                            🖨️ 打印三联单
+                        </button>
+
+                        <script>
+                        function printBill() {{
+                            var content = document.getElementById('bill').innerHTML;
+                            var style = document.getElementsByTagName('style')[0].innerHTML;
+                            var win = window.open('', '', 'height=600,width=800');
+                            win.document.write('<html><head><style>' + style + '</style></head><body>');
+                            win.document.write(content);
+                            win.document.write('</body></html>');
+                            win.document.close();
+                            setTimeout(function(){{ win.print(); win.close(); }}, 250);
+                        }}
+                        </script>
+                        """
+                        import streamlit.components.v1 as components
+                        components.html(bill_html, height=450)
+                        
+        except Exception as e:
+            st.error(f"出库模块错误: {e}")
     # --- D. 历史流水 ---
     elif menu == "🧾 历史流水":
         st.header("🧾 交易记录")
@@ -214,3 +321,4 @@ if check_password():
                     
         except Exception as e:
             st.error(f"客户模块加载异常: {e}")
+
