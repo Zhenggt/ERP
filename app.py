@@ -45,7 +45,8 @@ if check_password():
         st.header("📈 实时库存报表 (单位：公斤)")
         @st.cache_data(ttl=10)
         def load_inventory():
-            query = 'SELECT name as 品名, spec as 规格, stock as "库存余量(公斤)" FROM products ORDER BY stock DESC'
+            # 修改后的看板查询
+            query = 'SELECT name as 品名, spec as 规格, stock as "库存余量(公斤)" FROM products ORDER BY name, spec ASC'
             return pd.read_sql(query, engine)
         
         try:
@@ -73,9 +74,10 @@ if check_password():
             if st.form_submit_button("确认入库"):
                 if name:
                     with engine.connect() as conn:
-                        conn.execute(text("INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) "
-                                          "ON CONFLICT (name) DO UPDATE SET stock = products.stock + :num"),
-                                     {"n": name, "s": spec, "num": num})
+                          # 修改后的入库逻辑：匹配品名和规格
+                    conn.execute(text(""" INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) 
+                                        ON CONFLICT (name, spec)  DO UPDATE SET stock = products.stock + :num
+                                        """), {"n": name, "s": spec, "num": num})
                         conn.execute(text("INSERT INTO orders (type, product, num, price, total_amount) VALUES ('进货', :p, :n, :pr, :t)"),
                                      {"p": name, "n": num, "pr": in_price, "t": num * in_price})
                         conn.commit()
@@ -85,45 +87,55 @@ if check_password():
                     st.error("请输入货品名称")
 
     # --- C. 销售出库 ---
-    elif menu == "📤 销售出库":
+   elif menu == "📤 销售出库":
         st.header("📤 销售出库单 (单位：公斤)")
         try:
-            df_p = pd.read_sql("SELECT name, stock FROM products WHERE stock > 0", engine)
+            # 修改点：同时读取品名和规格
+            df_p = pd.read_sql("SELECT name, spec, stock FROM products WHERE stock > 0", engine)
             df_c = pd.read_sql("SELECT name FROM customers", engine)
             
             if df_p.empty:
-                st.warning("仓库目前无货，请先办理入库。")
+                st.warning("仓库目前无货。")
             else:
+                # 关键：将品名和规格合并为一个可选项
+                df_p['display_name'] = df_p['name'] + " | " + df_p['spec'].fillna("无规格")
+                
                 with st.form("out_form", clear_on_submit=True):
                     col1, col2 = st.columns(2)
                     with col1:
                         target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
-                        target_p = st.selectbox("📦 选择货品", df_p['name'].tolist())
+                        # 用户现在选的是“铝棒 | 5051”
+                        selected_option = st.selectbox("📦 选择货品 (品名 | 规格)", df_p['display_name'].tolist())
+                    
+                    # 根据选择的内容，反向拆分出品名和规格
+                    target_p = selected_option.split(" | ")[0]
+                    target_s = selected_option.split(" | ")[1]
+                    if target_s == "无规格": target_s = ""
+
                     with col2:
-                        num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01, format="%.2f")
-                        price = st.number_input("💰 销售单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
-                    
-                    total = num * price
-                    st.info(f"💡 合计：{num} 公斤 × {price} 元/公斤 = ￥{total:,.2f}")
-                    
-                    if st.form_submit_button("确认出库并扣减库存"):
-                        current_stock = float(df_p[df_p['name'] == target_p]['stock'].values[0])
+                        num = st.number_input("⚖️ 出库重量 (公斤)", min_value=0.0, step=0.01)
+                        price = st.number_input("💰 销售单价", min_value=0.0, step=0.01)
+
+                    if st.form_submit_button("确认出库"):
+                        # 查找对应的库存数值（匹配品名和规格）
+                        current_row = df_p[(df_p['name'] == target_p) & (df_p['spec'] == target_s)]
+                        current_stock = float(current_row['stock'].values[0])
+                        
                         if num > current_stock:
-                            st.error(f"❌ 库存不足！仅剩 {current_stock} 公斤")
-                        elif num <= 0:
-                            st.error("❌ 出库重量必须大于 0")
+                            st.error(f"库存不足！当前仅剩 {current_stock} 公斤")
                         else:
                             with engine.connect() as conn:
-                                conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p"),
-                                             {"n": num, "p": target_p})
-                                conn.execute(text("""INSERT INTO orders (type, customer, product, num, price, total_amount) 
-                                                VALUES ('销售', :c, :p, :n, :pr, :t)"""),
-                                             {"c": target_c, "p": target_p, "n": num, "pr": price, "t": total})
+                                # 减库存时，必须同时匹配 name 和 spec
+                                conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"),
+                                             {"n": num, "p": target_p, "s": target_s})
+                                # 记流水
+                                conn.execute(text("INSERT INTO orders (type, customer, product, num, price, total_amount) VALUES ('销售', :c, :p, :n, :pr, :t)"),
+                                             {"c": target_c, "p": selected_option, "n": num, "pr": price, "t": num * price})
                                 conn.commit()
-                            st.success(f"🚀 出库成功！{target_p} 减少 {num} 公斤")
+                            st.success(f"🚀 {selected_option} 出库成功！")
                             st.cache_data.clear()
         except Exception as e:
-            st.error(f"出库模块运行异常: {e}")
+            st.error(f"出错: {e}")
 
     # --- D. 客户档案 ---
     elif menu == "👥 客户档案":
@@ -155,3 +167,4 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
