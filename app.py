@@ -38,8 +38,7 @@ def check_password():
 # --- 3. 业务逻辑 ---
 if check_password():
     st.sidebar.title("🏮 功能导航")
-    menu = st.sidebar.radio("选择操作", ["📊 库存看板", "📥 采购入库", "📤 销售出库", "🧾 历史流水", "👥 客户档案""💰 财务对账",  # 新增
-    "📈 经营看板"])
+    menu = st.sidebar.radio("选择操作", ["📊 库存看板", "📥 采购入库", "📤 销售出库", "🧾 历史流水", "👥 客户档案","💰 财务对账", "📈 经营看板"])
 
     # --- A. 库存看板 ---
     if menu == "📊 库存看板":
@@ -393,4 +392,5 @@ if check_password():
         """, engine)
         if not df_trend.empty:
             st.line_chart(df_trend.set_index('日期'))
+
 
