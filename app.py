@@ -74,7 +74,8 @@ if check_password():
                     conn.commit()
                 st.success(f"✅ {name} 已入库")
                 st.cache_data.clear() # 清除缓存强制刷新数据
- elif menu == "📤 销售出库":
+    # --- C. 销售出库 ---     
+     elif menu == "📤 销售出库":
         st.header("📤 销售出库单 (单位：公斤)")
         try:
             df_p = pd.read_sql("SELECT name, stock FROM products WHERE stock > 0", engine)
@@ -169,6 +170,7 @@ if check_password():
                     st.info("目前名册里还没有人，请在左边【新增客户】里添加。")
             except:
                 st.error("无法读取名册，请确认您已在 Supabase 运行了建表 SQL 代码。")
+
 
 
 
