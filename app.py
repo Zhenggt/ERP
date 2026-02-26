@@ -71,17 +71,23 @@ if check_password():
                 num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
                 in_price = st.number_input("采购单价 (元/公斤)", min_value=0.0, step=0.01)
             
-            if st.form_submit_button("确认入库"):
+           if st.form_submit_button("确认入库"):
                 if name:
                     with engine.connect() as conn:
-                          # 修改后的入库逻辑：匹配品名和规格
-                    conn.execute(text(""" INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) 
-                                        ON CONFLICT (name, spec)  DO UPDATE SET stock = products.stock + :num
-                                        """), {"n": name, "s": spec, "num": num})
-                        conn.execute(text("INSERT INTO orders (type, product, num, price, total_amount) VALUES ('进货', :p, :n, :pr, :t)"),
-                                     {"p": name, "n": num, "pr": in_price, "t": num * in_price})
+                        # 注意：下面这两行必须比 with 语句多出 4 个空格
+                        conn.execute(text(""" 
+                            INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) 
+                            ON CONFLICT (name, spec) 
+                            DO UPDATE SET stock = products.stock + :num
+                        """), {"n": name, "s": spec, "num": num})
+                        
+                        conn.execute(text("""
+                            INSERT INTO orders (type, product, num, price, total_amount) 
+                            VALUES ('进货', :p, :n, :pr, :t)
+                        """), {"p": name, "n": num, "pr": in_price, "t": num * in_price})
+                        
                         conn.commit()
-                    st.success(f"✅ {name} {num}公斤 已入库")
+                    st.success(f"✅ {name} | {spec} 已入库")
                     st.cache_data.clear()
                 else:
                     st.error("请输入货品名称")
@@ -167,4 +173,5 @@ if check_password():
                 st.dataframe(df_cust, width='stretch', hide_index=True)
             except:
                 st.info("暂无客户资料数据")
+
 
