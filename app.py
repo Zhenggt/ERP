@@ -38,7 +38,8 @@ def check_password():
 # --- 3. 业务逻辑 ---
 if check_password():
     st.sidebar.title("🏮 功能导航")
-    menu = st.sidebar.radio("选择操作", ["📊 库存看板", "📥 采购入库", "📤 销售出库", "🧾 历史流水", "👥 客户档案"])
+    menu = st.sidebar.radio("选择操作", ["📊 库存看板", "📥 采购入库", "📤 销售出库", "🧾 历史流水", "👥 客户档案""💰 财务对账",  # 新增
+    "📈 经营看板"])
 
     # --- A. 库存看板 ---
     if menu == "📊 库存看板":
@@ -74,7 +75,6 @@ if check_password():
                     st.cache_data.clear()
 
     # --- C. 销售出库 ---
-    # --- C. 销售出库 ---
     elif menu == "📤 销售出库":
         st.header("📤 销售出库单")
         try:
@@ -108,6 +108,9 @@ if check_password():
                 with col2:
                     num = st.number_input("⚖️ 出库重量 (kg)", min_value=0.0, step=0.01)
                     price = st.number_input("💰 销售单价 (元)", min_value=0.0, step=0.01)
+                    # --- 新增：选择支付状态 ---
+                    pay_status = st.radio("付款状态", ["已结清", "客户欠款"], horizontal=True)
+                    p_status_val = 'paid' if pay_status == "已结清" else 'unpaid'
 
                 total = round(num * price, 2)
                 
@@ -132,9 +135,9 @@ if check_password():
                             conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), 
                                          {"n": num, "p": p_n, "s": p_s})
                             conn.execute(text("""
-                                INSERT INTO orders (type, customer, product, num, price, total_amount) 
-                                VALUES ('销售', :c, :p, :n, :pr, :t)
-                            """), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total})
+                                 INSERT INTO orders (type, customer, product, num, price, total_amount, payment_status) 
+                                 VALUES ('销售', :c, :p, :n, :pr, :t, :ps)
+                            """), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total, "ps": p_status_val})
                             conn.commit()
                         
                         st.success("✅ 出库成功！单据生成如下：")
@@ -390,3 +393,4 @@ if check_password():
         """, engine)
         if not df_trend.empty:
             st.line_chart(df_trend.set_index('日期'))
+
