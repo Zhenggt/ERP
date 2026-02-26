@@ -3,7 +3,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 
 # --- 1. 配置与性能优化 ---
-st.set_page_config(page_title="南总进销存系统", layout="wide")
+st.set_page_config(page_title="进销存系统", layout="wide")
 
 @st.cache_resource
 def get_engine():
@@ -19,7 +19,7 @@ engine = get_engine()
 # --- 2. 安全登录模块 ---
 def check_password():
     if "password_correct" not in st.session_state:
-        st.title("🔒 南总云端管理系统")
+        st.title("🔒 云端管理系统")
         with st.container():
             u = st.text_input("账号")
             p = st.text_input("密码", type="password")
@@ -44,22 +44,26 @@ if check_password():
 
     # --- A. 库存看板 ---
     if menu == "📊 库存看板":
-        st.header("实时库存统计")
-        @st.cache_data(ttl=10) # 缓存10秒，减少数据库压力
+        st.header("📈 实时库存报表 (单位：公斤)")
+        @st.cache_data(ttl=10)
         def load_inventory():
-            return pd.read_sql("SELECT name as 品名, spec as 规格, stock as 数量 FROM products ORDER BY stock DESC", engine)
+            # 这里把 SQL 查询的别名改掉
+            return pd.read_sql("SELECT name as 品名, spec as 规格, stock as '库存余量(公斤)' FROM products ORDER BY stock DESC", engine)
         
         df = load_inventory()
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # --- B. 采购入库 ---
+   # --- B. 采购入库 ---
     elif menu == "📥 采购入库":
-        st.header("商品采购入库")
+        st.header("📥 增加库存 (公斤)")
         with st.form("in_form", clear_on_submit=True):
             name = st.text_input("货品名称")
             spec = st.text_input("规格型号")
-            num = st.number_input("入库数量", min_value=1, step=1)
+            # 把 step 改成 0.1，方便输入半斤八两
+            num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
+            
             if st.form_submit_button("确认入库"):
+                # ... (后续数据库保存逻辑保持不变)
                 with engine.connect() as conn:
                     # 更新库存：若品名存在则累加，不存在则插入
                     conn.execute(text("INSERT INTO products (name, spec, stock) VALUES (:n, :s, :num) "
@@ -70,29 +74,24 @@ if check_password():
                     conn.commit()
                 st.success(f"✅ {name} 已入库")
                 st.cache_data.clear() # 清除缓存强制刷新数据
-   # --- C. 销售出库 (提速加账本版) ---
+   # --- C. 销售出库 ---
     elif menu == "📤 销售出库":
-        st.header("🧾 销售出库单")
-        try:
-            # 1. 读取数据
-            df_p = pd.read_sql("SELECT name, stock FROM products WHERE stock > 0", engine)
-            df_c = pd.read_sql("SELECT name FROM customers", engine)
+        st.header("📤 销售出库单 (公斤)")
+        # ... (前面读取数据库逻辑保持不变)
+        with st.form("out_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
+                target_p = st.selectbox("📦 选择货品", df_p['name'].tolist())
+            with col2:
+                # 把数量改为重量，支持小数
+                num = st.number_input("🔢 出库重量 (公斤)", min_value=0.0, step=0.1, format="%.2f")
+                price = st.number_input("💰 销售单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
             
-            if df_p.empty:
-                st.warning("仓库目前无货，请先办理入库。")
-            else:
-                with st.form("out_form", clear_on_submit=True):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        target_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
-                        target_p = st.selectbox("📦 选择货品", df_p['name'].tolist())
-                    with col2:
-                        num = st.number_input("🔢 出库数量", min_value=1, step=1)
-                        price = st.number_input("💰 销售单价", min_value=0.0, step=0.01, format="%.2f")
-                    
-                    # 自动计算预览
-                    total = num * price
-                    st.info(f"💡 合计总金额：￥{total:,.2f}")
+            # 计算预览
+            total = num * price
+            st.info(f"💡 计算结果：{num} 公斤 × {price} 元/公斤 = ￥{total:,.2f}")
+            # ... (后续提交逻辑保持不变)
                     
                     if st.form_submit_button("确认成交并减库存"):
                         current_stock = df_p[df_p['name'] == target_p]['stock'].values[0]
@@ -164,5 +163,6 @@ if check_password():
                     st.info("目前名册里还没有人，请在左边【新增客户】里添加。")
             except:
                 st.error("无法读取名册，请确认您已在 Supabase 运行了建表 SQL 代码。")
+
 
 
