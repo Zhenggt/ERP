@@ -87,12 +87,25 @@ if check_password():
                     prod_name = st.selectbox("选择货品", df_p['name'].tolist())
                     out_num = st.number_input("出库数量", min_value=1, step=1)
                     
-                    if st.form_submit_button("确认出库"):
+                   if st.form_submit_button("确认出库"):
                         current_stock = df_p[df_p['name'] == prod_name]['stock'].values[0]
                         if out_num > current_stock:
                             st.error(f"库存不足！剩余 {current_stock}")
                         else:
                             with engine.connect() as conn:
-                                conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p"),
-                                             {"n": out_num, "p": prod_name})
-                                conn.execute(text("INSERT INTO orders (type, customer, product, num) VALUES ('销售', :c, :p, :n)"),
+                                # 1. 更新产品库存
+                                conn.execute(
+                                    text("UPDATE products SET stock = stock - :n WHERE name = :p"),
+                                    {"n": out_num, "p": prod_name}
+                                ) # <-- 确保这里有右括号闭合
+                                
+                                # 2. 插入销售流水记录
+                                conn.execute(
+                                    text("INSERT INTO orders (type, customer, product, num) VALUES ('销售', :c, :p, :n)"),
+                                    {"c": cust_name, "p": prod_name, "n": out_num}
+                                ) # <-- 确保这里有右括号闭合
+                                
+                                conn.commit()
+                            st.success(f"🚀 {prod_name} 出库成功")
+                            st.cache_data.clear()
+
