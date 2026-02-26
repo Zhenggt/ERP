@@ -145,13 +145,14 @@ if check_password():
         except Exception as e:
             st.error(f"运行异常: {e}")
 
-    # --- D. 历史流水 ---
+   # --- D. 历史流水 ---
     elif menu == "🧾 历史流水":
         st.header("🧾 进销存历史记录")
         try:
-            # 1. 查询数据：AT TIME ZONE 将 UTC 转为北京时间
+            # 1. 查询数据：将 UTC 转为北京时间 (Asia/Shanghai)
             query = """
                 SELECT 
+                    created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai' as raw_time,
                     TO_CHAR(created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI') as 时间, 
                     type as 类型, 
                     customer as 客户, 
@@ -165,30 +166,66 @@ if check_password():
             df_o = pd.read_sql(query, engine)
             
             if not df_o.empty:
-                # --- 2. 筛选功能栏 ---
-                col1, col2 = st.columns(2)
-                with col1:
-                    # 按货品搜索
-                    search_query = st.text_input("🔍 按货品或规格搜索", "")
-                with col2:
-                    # 按类型筛选 (全部/销售/进货)
-                    filter_type = st.selectbox("📅 记录类型", ["全部", "销售", "进货"])
+                # 确保时间列是日期格式，方便筛选
+                df_o['raw_time'] = pd.to_datetime(df_o['raw_time'])
 
-                # --- 3. 执行过滤逻辑 ---
-                filtered_df = df_o.copy()
-                if search_query:
-                    filtered_df = filtered_df[filtered_df['货品'].str.contains(search_query, case=False, na=False)]
+                # --- 筛选功能区 ---
+                st.write("🔍 **数据筛选**")
+                c1, c2, c3 = st.columns([2, 1, 1])
                 
+                with c1:
+                    # 日期区间选择器
+                    date_range = st.date_input(
+                        "选择日期范围",
+                        value=(datetime.now().date(), datetime.now().date()),
+                        help="选择开始和结束日期"
+                    )
+                with c2:
+                    filter_type = st.selectbox("记录类型", ["全部", "销售", "进货"])
+                with c3:
+                    search_query = st.text_input("货品搜索", "")
+
+                # --- 执行过滤逻辑 ---
+                filtered_df = df_o.copy()
+
+                # 1. 日期过滤 (需处理用户只选了一个日期的情况)
+                if isinstance(date_range, tuple) and len(date_range) == 2:
+                    start_date, end_date = date_range
+                    # 将 pandas 的时间列转为 date 类型对比
+                    filtered_df = filtered_df[
+                        (filtered_df['raw_time'].dt.date >= start_date) & 
+                        (filtered_df['raw_time'].dt.date <= end_date)
+                    ]
+
+                # 2. 类型过滤
                 if filter_type != "全部":
                     filtered_df = filtered_df[filtered_df['类型'] == filter_type]
 
-                # --- 4. 展示筛选后的结果 ---
-                st.write(f"共找到 {len(filtered_df)} 条记录")
-                st.dataframe(filtered_df, width='stretch', hide_index=True)
+                # 3. 关键词过滤
+                if search_query:
+                    filtered_df = filtered_df[filtered_df['货品'].str.contains(search_query, case=False, na=False)]
+
+                # --- 展示与导出 ---
+                # 隐藏掉辅助用的 raw_time 列再显示
+                display_df = filtered_df.drop(columns=['raw_time'])
                 
-                # 可选：导出按钮
-                csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
-                st.download_button("📥 下载当前报表 (Excel可开)", data=csv, file_name=f"流水_{datetime.now().strftime('%Y%m%d')}.csv")
+                st.divider()
+                st.subheader(f"📊 查询结果 (共 {len(display_df)} 条)")
+                
+                # 计算当前筛选结果的总金额
+                total_sum = display_df['总计'].sum()
+                st.info(f"💰 选定范围内合计金额：**¥ {total_sum:,.2f}**")
+                
+                st.dataframe(display_df, width='stretch', hide_index=True)
+                
+                # 导出按钮
+                csv = display_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 导出筛选结果为 Excel CSV",
+                    data=csv,
+                    file_name=f"流水_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime='text/csv'
+                )
             else:
                 st.info("暂无交易记录")
         except Exception as e:
@@ -205,4 +242,5 @@ if check_password():
                     conn.commit()
                 st.success("客户已保存")
                 st.cache_data.clear()
+
 
