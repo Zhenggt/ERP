@@ -47,11 +47,15 @@ if check_password():
         st.header("📈 实时库存报表 (单位：公斤)")
         @st.cache_data(ttl=10)
         def load_inventory():
-            # 这里把 SQL 查询的别名改掉
-            return pd.read_sql("SELECT name as 品名, spec as 规格, stock as '库存余量(公斤)' FROM products ORDER BY stock DESC", engine)
+            # 使用双引号包裹带括号的列名
+            query = 'SELECT name as 品名, spec as 规格, stock as "库存余量(公斤)" FROM products ORDER BY stock DESC'
+            return pd.read_sql(query, engine)
         
-        df = load_inventory()
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        try:
+            df = load_inventory()
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        except Exception as e:
+            st.error(f"查询失败，请检查数据库。错误详情: {e}")
 
    # --- B. 采购入库 ---
     elif menu == "📥 采购入库":
@@ -170,6 +174,7 @@ if check_password():
                     st.info("目前名册里还没有人，请在左边【新增客户】里添加。")
             except:
                 st.error("无法读取名册，请确认您已在 Supabase 运行了建表 SQL 代码。")
+
 
 
 
