@@ -203,18 +203,66 @@ if check_password():
                 st.components.v1.html(bill_html, height=550)
                 st.cache_data.clear()
     # --- D. 历史流水 (管理员) ---
+    # --- 模块 D: 历史流水 (2026 北京时间修正版) ---
     elif menu == "🧾 历史流水":
         st.header("🧾 业务流水记录")
-        df_history = pd.read_sql("SELECT id, created_at, type, customer, product, num, total_amount, payment_status FROM orders ORDER BY created_at DESC", engine)
-        st.dataframe(df_history, width='stretch', hide_index=True)
-        if role == "admin":
-            with st.expander("🗑️ 删除错误记录"):
-                del_id = st.number_input("输入要删除的ID", step=1)
-                if st.button("执行删除", type="primary"):
-                    with engine.connect() as conn:
-                        conn.execute(text("DELETE FROM orders WHERE id = :id"), {"id": del_id})
-                        conn.commit()
-                    st.rerun()
+        
+        # 1. 从数据库读取所有流水
+        df_history = pd.read_sql("SELECT * FROM orders ORDER BY created_at DESC", engine)
+        
+        if not df_history.empty:
+            # --- 核心：强制转换时间为北京时间 ---
+            df_history['created_at'] = pd.to_datetime(df_history['created_at'])
+            
+            # 判断时间是否有偏差。如果数据库时间是 UTC，转换成北京时间
+            try:
+                if df_history['created_at'].dt.tz is None:
+                    # 假定数据库存的是 UTC，将其转为北京时间
+                    df_history['显示时间'] = df_history['created_at'].dt.tz_localize('UTC').dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    df_history['显示时间'] = df_history['created_at'].dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                # 备用方案：如果时区转换失败，直接按原样显示，去掉秒后面的小数点
+                df_history['显示时间'] = df_history['created_at'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+            # 2. 汉化列名与状态显示
+            df_display = df_history.copy()
+            df_display['状态'] = df_display['payment_status'].map({'paid': '✅ 已结清', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审核'})
+            
+            # 整理出需要展示的列（把 ID 放在最前面方便删除参考）
+            show_cols = {
+                'id': 'ID',
+                '显示时间': '交易时间',
+                'type': '业务类型',
+                'customer': '客户',
+                'product': '货品详情',
+                'num': '重量(kg)',
+                'total_amount': '金额',
+                '状态': '付款状态'
+            }
+            
+            # 3. 渲染表格 (使用 2026 最新参数 width='stretch')
+            st.dataframe(df_display[list(show_cols.keys())].rename(columns=show_cols), 
+                         width='stretch', 
+                         hide_index=True)
+
+            # --- 4. 管理员专属删除功能 (仅 D 功能保留) ---
+            if role == "admin":
+                st.markdown("---")
+                with st.expander("🗑️ 危险操作：删除错误记录"):
+                    st.warning("删除记录后无法恢复，请谨慎操作！")
+                    del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0)
+                    if st.button("确认删除该条流水", type="primary", width='stretch'):
+                        if del_id > 0:
+                            with engine.connect() as conn:
+                                conn.execute(text("DELETE FROM orders WHERE id = :id"), {"id": del_id})
+                                conn.commit()
+                            st.success(f"ID 为 {del_id} 的记录已成功删除")
+                            st.rerun()
+                        else:
+                            st.error("请输入有效的记录 ID")
+        else:
+            st.info("目前没有任何业务流水。")
 
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
@@ -337,6 +385,7 @@ if check_password():
                 st.dataframe(df_debt, width='stretch', hide_index=True)
             else:
                 st.success("🎉 太棒了！目前没有任何客户欠款。")
+
 
 
 
