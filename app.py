@@ -202,67 +202,62 @@ if check_password():
                 """
                 st.components.v1.html(bill_html, height=550)
                 st.cache_data.clear()
-    # --- D. 历史流水 (管理员) ---
-    # --- 模块 D: 历史流水 (2026 北京时间修正版) ---
+   # --- 模块 D: 历史流水 (强力修复：保证出数据版) ---
     elif menu == "🧾 历史流水":
         st.header("🧾 业务流水记录")
         
-        # 1. 从数据库读取所有流水
-        df_history = pd.read_sql("SELECT * FROM orders ORDER BY created_at DESC", engine)
+        # 1. 直接读取原始数据
+        df_history = pd.read_sql("SELECT * FROM orders ORDER BY id DESC", engine)
         
         if not df_history.empty:
-            # --- 核心：强制转换时间为北京时间 ---
+            # 2. 转换时间格式（先转成 Pandas 时间对象）
             df_history['created_at'] = pd.to_datetime(df_history['created_at'])
             
-            # 判断时间是否有偏差。如果数据库时间是 UTC，转换成北京时间
-            try:
-                if df_history['created_at'].dt.tz is None:
-                    # 假定数据库存的是 UTC，将其转为北京时间
-                    df_history['显示时间'] = df_history['created_at'].dt.tz_localize('UTC').dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    df_history['显示时间'] = df_history['created_at'].dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d %H:%M:%S')
-            except Exception:
-                # 备用方案：如果时区转换失败，直接按原样显示，去掉秒后面的小数点
-                df_history['显示时间'] = df_history['created_at'].dt.strftime('%Y-%m-%d %H:%M:%S')
-
-            # 2. 汉化列名与状态显示
-            df_display = df_history.copy()
-            df_display['状态'] = df_display['payment_status'].map({'paid': '✅ 已结清', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审核'})
+            # --- 关键：手动补时差 ---
+            # 如果你发现时间还是慢了8小时，就把下面这行开头的 # 号删掉
+            # df_history['created_at'] = df_history['created_at'] + pd.Timedelta(hours=8)
             
-            # 整理出需要展示的列（把 ID 放在最前面方便删除参考）
-            show_cols = {
+            # 3. 格式化为整齐的字符串显示
+            df_history['交易时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
+            
+            # 4. 汉化状态图标
+            status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
+            df_history['付款状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
+            
+            # 5. 定义要显示的列（严格匹配数据库字段名）
+            # 确保这些字段名在你数据库里都是存在的
+            display_cols = {
                 'id': 'ID',
-                '显示时间': '交易时间',
-                'type': '业务类型',
+                '交易时间': '时间',
+                'type': '类型',
                 'customer': '客户',
-                'product': '货品详情',
-                'num': '重量(kg)',
+                'product': '货品',
+                'num': '重量',
                 'total_amount': '金额',
-                '状态': '付款状态'
+                '付款状态': '状态'
             }
             
-            # 3. 渲染表格 (使用 2026 最新参数 width='stretch')
-            st.dataframe(df_display[list(show_cols.keys())].rename(columns=show_cols), 
-                         width='stretch', 
-                         hide_index=True)
+            # 6. 渲染表格
+            st.dataframe(
+                df_history[list(display_cols.keys())].rename(columns=display_cols),
+                width='stretch',
+                hide_index=True
+            )
 
-            # --- 4. 管理员专属删除功能 (仅 D 功能保留) ---
+            # --- 7. 管理员删除功能 ---
             if role == "admin":
-                st.markdown("---")
-                with st.expander("🗑️ 危险操作：删除错误记录"):
-                    st.warning("删除记录后无法恢复，请谨慎操作！")
-                    del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0)
-                    if st.button("确认删除该条流水", type="primary", width='stretch'):
+                st.divider()
+                with st.expander("🗑️ 删除记录"):
+                    del_id = st.number_input("输入要删除的记录 ID", step=1, value=0)
+                    if st.button("确认删除", type="primary", width='stretch'):
                         if del_id > 0:
                             with engine.connect() as conn:
                                 conn.execute(text("DELETE FROM orders WHERE id = :id"), {"id": del_id})
                                 conn.commit()
-                            st.success(f"ID 为 {del_id} 的记录已成功删除")
+                            st.success(f"ID {del_id} 已删除")
                             st.rerun()
-                        else:
-                            st.error("请输入有效的记录 ID")
         else:
-            st.info("目前没有任何业务流水。")
+            st.info("暂无流水数据")
 
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
