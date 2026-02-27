@@ -104,7 +104,7 @@ if check_password():
             total = round(num * price, 2)
             st.info(f"合计金额：¥ {total:,.2f}")
             
-          if st.button("确认提交并生成单据", use_container_width=True):
+            if st.button("确认提交并生成单据", use_container_width=True):
                 stock_now = float(df_p[df_p['display'] == s_o]['stock'].values[0])
                 if num > stock_now: 
                     st.error(f"库存不足！当前余量：{stock_now} kg")
@@ -237,6 +237,7 @@ if check_password():
         df_stats = pd.read_sql("SELECT SUM(total_amount) as total FROM orders WHERE type='销售' AND created_at >= date_trunc('month', current_date)", engine)
         st.metric("本月累计销售额", f"¥ {df_stats['total'].iloc[0] or 0:,.2f}")
         # 这里可以加入 line_chart 绘制趋势图
+
 
 
 
