@@ -286,11 +286,11 @@ if check_password():
                      st.warning("点击后记录将移入回收站，库存将自动返还。")
                      del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
         
-            if st.button("确认删除并返还库存", type="primary", width='stretch'):
-            if del_id > 0:
-                with engine.connect() as conn:
+            if st.button("确认删除并返还库存", type="primary", width='stretch'):               
+                if del_id > 0:
+                   with engine.connect() as conn:
                     # 1. 先查出这笔单子的货品和数量，用来返还库存
-                    order = conn.execute(text("SELECT product, num FROM orders WHERE id = :id AND is_active = 1"), {"id": del_id}).fetchone()
+                       order = conn.execute(text("SELECT product, num FROM orders WHERE id = :id AND is_active = 1"), {"id": del_id}).fetchone()
                     
                     if order:
                         p_display, n_val = order[0], order[1]
@@ -502,6 +502,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
