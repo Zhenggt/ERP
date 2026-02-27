@@ -471,58 +471,94 @@ if check_password():
         df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
         st.dataframe(df_unpaid, width='stretch', hide_index=True)
 
-# --- H. 经营看板 (管理员专享) ---
+# --- 模块 H: 经营看板 (2026 利润精算版) ---
     elif menu == "📈 经营看板":
-        st.header("📈 经营数据分析")
+        st.header("📈 经营数据深度分析")
         
-        # 1. 从数据库读取所有销售记录
-        df_sales = pd.read_sql("""
-            SELECT created_at, total_amount, payment_status 
-            FROM orders 
-            WHERE type = '销售'
-        """, engine)
+        try:
+            # 1. 读取所有有效流水 (包含销售和采购) 用于计算利润
+            query = "SELECT * FROM orders WHERE (is_active != 0 OR is_active IS NULL)"
+            df_all = pd.read_sql(query, engine)
 
-        if df_sales.empty:
-            st.warning("目前还没有销售数据，请先去『销售出库』录入单据。")
-        else:
-            # 数据预处理
-            df_sales['created_at'] = pd.to_datetime(df_sales['created_at'])
-            df_sales['date'] = df_sales['created_at'].dt.date
-            
-            # 2. 核心指标卡片
-            total_rev = df_sales['total_amount'].sum()
-            paid_rev = df_sales[df_sales['payment_status'] == 'paid']['total_amount'].sum()
-            unpaid_rev = df_sales[df_sales['payment_status'] == 'unpaid']['total_amount'].sum()
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("总销售额", f"¥ {total_rev:,.2f}")
-            col2.metric("已收金额", f"¥ {paid_rev:,.2f}", delta=f"{paid_rev/total_rev*100:.1f}%" if total_rev > 0 else "0%")
-            col3.metric("待收欠款", f"¥ {unpaid_rev:,.2f}", delta=f"-{unpaid_rev/total_rev*100:.1f}%", delta_color="inverse")
-
-            st.divider()
-
-            # 3. 销售趋势图
-            st.subheader("🗓️ 每日销售走势")
-            trend_data = df_sales.groupby('date')['total_amount'].sum().reset_index()
-            st.line_chart(trend_data.set_index('date'), width='stretch')
-
-            # 4. 欠款分布（按客户）
-            st.subheader("👤 客户欠款排名")
-            df_debt = pd.read_sql("""
-                SELECT customer as 客户, SUM(total_amount) as 欠款金额 
-                FROM orders 
-                WHERE type = '销售' AND payment_status = 'unpaid'
-                GROUP BY customer
-                ORDER BY 欠款金额 DESC
-            """, engine)
-            
-            if not df_debt.empty:
-                st.bar_chart(df_debt.set_index('客户'), width='stretch')
-                st.dataframe(df_debt, width='stretch', hide_index=True)
+            if df_all.empty:
+                st.warning("⚠️ 目前还没有任何业务数据，请先录入单据。")
             else:
-                st.success("🎉 太棒了！目前没有任何客户欠款。")
+                # 时间预处理 (修正北京时间)
+                df_all['created_at'] = pd.to_datetime(df_all['created_at']) + pd.Timedelta(hours=8)
+                df_all['日期'] = df_all['created_at'].dt.date
+                
+                # --- A. 核心利润算法：计算每个货品的平均进价成本 ---
+                # 过滤采购入库记录
+                df_purchase = df_all[df_all['type'] == '采购入库']
+                # 建立货品成本字典：{货品名称: 平均单价}
+                cost_dict = df_purchase.groupby('product').apply(
+                    lambda x: x['total_amount'].sum() / x['num'].sum() if x['num'].sum() > 0 else 0
+                ).to_dict()
 
-# --- 模块 G: 回收站 (修正版) ---
+                # --- B. 销售数据提取 ---
+                # 注意：这里的 type 需匹配你数据库中存入的字样，如 '销售出库'
+                df_sales = df_all[df_all['type'] == '销售出库'].copy()
+
+                if df_sales.empty:
+                    st.info("💡 暂无销售出库数据，无法展示销售分析。")
+                else:
+                    # 计算每笔销售的利润
+                    # 逻辑：销售金额 - (销售数量 * 对应货品的平均进价)
+                    # 如果没有进货记录，则按销售额的 20% 估算毛利
+                    df_sales['单位成本'] = df_sales['product'].map(cost_dict).fillna(df_sales['total_amount']/df_sales['num'] * 0.8)
+                    df_sales['总利润'] = df_sales['total_amount'] - (df_sales['单位成本'] * df_sales['num'])
+
+                    # --- 2. 核心指标卡片 (全中文) ---
+                    total_rev = df_sales['total_amount'].sum()
+                    total_profit = df_sales['总利润'].sum()
+                    unpaid_rev = df_sales[df_sales['payment_status'] == 'unpaid']['total_amount'].sum()
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("💰 累计销售额", f"¥ {total_rev:,.2f}")
+                    c2.metric("🧧 累计净利润", f"¥ {total_profit:,.2f}", 
+                              delta=f"利润率 {(total_profit/total_rev*100):.1f}%" if total_rev > 0 else "0%")
+                    c3.metric("⚠️ 待收总欠款", f"¥ {unpaid_rev:,.2f}", 
+                              delta=f"{(unpaid_rev/total_rev*100):.1f}% 占比" if total_rev > 0 else "0%", delta_color="inverse")
+
+                    st.divider()
+
+                    # --- 3. 销售与利润走势图 (更直观的面积图) ---
+                    st.subheader("🗓️ 每日营业走势 (近30天)")
+                    trend_data = df_sales.groupby('日期').agg({
+                        'total_amount': 'sum',
+                        '总利润': 'sum'
+                    }).reset_index()
+                    trend_data.columns = ['日期', '销售金额', '纯利润']
+                    # 使用面积图展示，更加美观直观
+                    st.area_chart(trend_data.set_index('日期'), use_container_width=True)
+
+                    # --- 4. 欠款分布与盈利排行 (左右并列) ---
+                    col_left, col_right = st.columns(2)
+                    
+                    with col_left:
+                        st.subheader("👤 客户欠款排名")
+                        df_debt = df_sales[df_sales['payment_status'] == 'unpaid'].groupby('customer')['total_amount'].sum().reset_index()
+                        df_debt.columns = ['客户', '欠款金额']
+                        df_debt = df_debt.sort_values(by='欠款金额', ascending=False)
+                        
+                        if not df_debt.empty:
+                            st.bar_chart(df_debt.set_index('客户'))
+                            st.dataframe(df_debt, width='stretch', hide_index=True)
+                        else:
+                            st.success("🎉 账目清爽，目前无欠款！")
+
+                    with col_right:
+                        st.subheader("🏆 货品盈利贡献")
+                        df_rank = df_sales.groupby('product')['总利润'].sum().reset_index()
+                        df_rank.columns = ['货品', '利润贡献']
+                        df_rank = df_rank.sort_values(by='利润贡献', ascending=False)
+                        
+                        st.bar_chart(df_rank.set_index('货品'))
+                        st.dataframe(df_rank, width='stretch', hide_index=True)
+
+        except Exception as e:
+            st.error(f"❌ 看板加载异常: {e}")
+# --- 模块 I: 回收站 (修正版) ---
     elif menu == "♻️ 回收站":
         st.header("♻️ 数据回收站")
         st.info("提示：回收站中的数据不会计入经营统计。")
@@ -612,6 +648,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
