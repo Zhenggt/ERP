@@ -134,9 +134,9 @@ if check_password():
             # 第三行：数量与单价
             col_n, col_pr = st.columns(2)
             with col_n:
-                in_num = st.number_input("入库重量 (吨/件)", min_value=0.0, step=0.01, format="%.2f")
+                in_num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.01, format="%.2f")
             with col_pr:
-                in_price = st.number_input("进货单价 (元)", min_value=0.0, step=0.01, format="%.2f")
+                in_price = st.number_input("进货单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
 
             submit_btn = st.form_submit_button("确认提交入库", type="primary", width='stretch')
 
@@ -568,6 +568,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
