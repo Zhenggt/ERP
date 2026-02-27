@@ -281,35 +281,39 @@ if check_password():
 
         # 在“历史流水”模块，管理员删除功能区
             if role == "admin":
-                st.divider()
-                with st.expander("🗑️ 危险操作：删除错误记录"):
-                     st.warning("点击后记录将移入回收站，库存将自动返还。")
-                     del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
-        
+        st.divider()
+        with st.expander("🗑️ 危险操作：删除错误记录"):
+            st.warning("点击后记录将移入回收站，库存将自动返还。")
+            del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
+            
+            # 注意：按钮必须在 expander 的缩进范围内
             if st.button("确认删除并返还库存", type="primary", width='stretch'):               
                 if del_id > 0:
-                   with engine.connect() as conn:
-                    # 1. 先查出这笔单子的货品和数量，用来返还库存
-                       order = conn.execute(text("SELECT product, num FROM orders WHERE id = :id AND is_active = 1"), {"id": del_id}).fetchone()
-                    
-                    if order:
-                        p_display, n_val = order[0], order[1]
-                        # 拆分品名和规格
-                        p_parts = p_display.split(" | ")
-                        p_n = p_parts[0]
-                        p_s = p_parts[1] if len(p_parts) > 1 else "标准"
+                    with engine.connect() as conn:
+                        # 1. 先查出这笔单子的货品和数量，用来返还库存
+                        query = text("SELECT product, num FROM orders WHERE id = :id AND is_active = 1")
+                        order = conn.execute(query, {"id": del_id}).fetchone()
                         
-                        # 2. 把库存加回去 (因为这笔买卖“作废”了)
-                        conn.execute(text("UPDATE products SET stock = stock + :n WHERE name = :p AND spec = :s"), {"n": n_val, "p": p_n, "s": p_s})
-                        
-                        # 3. 核心：不执行 DELETE，而是把 is_active 改为 0
-                        conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), {"id": del_id})
-                        
-                        conn.commit()
-                        st.success(f"✅ ID {del_id} 已成功移入回收站，库存已补回！")
-                        st.rerun()
-                    else:
-                        st.error("找不到该有效记录 ID，请核对是否已被删除。")
+                        if order:
+                            p_display, n_val = order[0], order[1]
+                            # 拆分品名和规格
+                            p_parts = p_display.split(" | ")
+                            p_n = p_parts[0]
+                            p_s = p_parts[1] if len(p_parts) > 1 else "标准"
+                            
+                            # 2. 把库存加回去 (因为这笔买卖“作废”了)
+                            conn.execute(text("UPDATE products SET stock = stock + :n WHERE name = :p AND spec = :s"), 
+                                         {"n": n_val, "p": p_n, "s": p_s})
+                            
+                            # 3. 核心：不执行 DELETE，而是把 is_active 改为 0
+                            conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), 
+                                         {"id": del_id})
+                            
+                            conn.commit()
+                            st.success(f"✅ ID {del_id} 已成功移入回收站，库存已补回！")
+                            st.rerun()
+                        else:
+                            st.error("找不到该有效记录 ID，请核对是否已被删除。")
 
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
@@ -502,6 +506,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
