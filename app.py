@@ -426,16 +426,14 @@ if check_password():
             else:
                 st.success("🎉 太棒了！目前没有任何客户欠款。")
 
-# --- 模块 G: 回收站 (完整唯一版) ---
+# --- 模块 G: 回收站 (修正版) ---
     elif menu == "♻️ 回收站":
         st.header("♻️ 数据回收站")
-        st.info("提示：回收站中的数据不会计入经营统计，也不会扣减库存。")
+        st.info("提示：回收站中的数据不会计入经营统计。")
         
-        # 使用标签页区分 订单 和 客户
         tab_order, tab_cust = st.tabs(["📄 订单回收站", "👥 客户回收站"])
 
         with tab_order:
-            # 读取 is_active = 0 的订单
             df_trash_o = pd.read_sql("""
                 SELECT id, created_at, type, customer, product, num, total_amount 
                 FROM orders 
@@ -452,17 +450,19 @@ if check_password():
                     if st.button("⏪ 撤销删除（还原数据）", width='stretch'):
                         if res_o_id > 0:
                             with engine.connect() as conn:
-                                # 1. 还原前先查出货品信息，准备重新扣减库存
-                                order = conn.execute(text("SELECT product, num FROM orders WHERE id = :id"), {"id": res_o_id}).fetchone()
+                                order = conn.execute(text("SELECT type, product, num FROM orders WHERE id = :id"), {"id": res_o_id}).fetchone()
                                 if order:
-                                    p_display, n_val = order[0], order[1]
+                                    o_type, p_display, n_val = order[0], order[1], order[2]
                                     p_parts = p_display.split(" | ")
                                     p_n = p_parts[0]
                                     p_s = p_parts[1] if len(p_parts) > 1 else "标准"
                                     
-                                    # 2. 重新扣库存 (对应销售单还原)
-                                    conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), {"n": n_val, "p": p_n, "s": p_s})
-                                    # 3. 标记回正常状态
+                                    # 判断是入库还是出库，反向操作库存
+                                    if "入库" in o_type or "采购" in o_type:
+                                        conn.execute(text("UPDATE products SET stock = stock + :n WHERE name = :p AND spec = :s"), {"n": n_val, "p": p_n, "s": p_s})
+                                    else:
+                                        conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), {"n": n_val, "p": p_n, "s": p_s})
+                                    
                                     conn.execute(text("UPDATE orders SET is_active = 1 WHERE id = :id"), {"id": res_o_id})
                                     conn.commit()
                                     st.success(f"✅ ID {res_o_id} 已还原")
@@ -472,7 +472,6 @@ if check_password():
                     if st.button("🔥 彻底粉碎（不可恢复）", type="primary", width='stretch'):
                         if del_o_id > 0:
                             with engine.connect() as conn:
-                                # 彻底从数据库抹除 (确保这里括号闭合)
                                 conn.execute(text("DELETE FROM orders WHERE id = :id"), {"id": del_o_id})
                                 conn.commit()
                             st.error(f"💀 ID {del_o_id} 已永久删除")
@@ -481,13 +480,11 @@ if check_password():
                 st.write("订单回收站目前是空的。")
 
         with tab_cust:
-            # 读取 is_active = 0 的客户
             df_trash_c = pd.read_sql("SELECT name, phone, address, remark FROM customers WHERE is_active = 0", engine)
-            
             if not df_trash_c.empty:
                 st.dataframe(df_trash_c, width='stretch', hide_index=True)
                 res_c_name = st.selectbox("选择要还原的客户", df_trash_c['name'].tolist())
-                if st.button("⏪ 还原该客户资料"):
+                if st.button("⏪ 还原该客户资料", width='stretch'):
                     with engine.connect() as conn:
                         conn.execute(text("UPDATE customers SET is_active = 1 WHERE name = :n"), {"n": res_c_name})
                         conn.commit()
