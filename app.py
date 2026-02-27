@@ -3,42 +3,55 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta, timezone
 
-# --- 1. 初始化与配置 ---
-st.set_page_config(page_title="铝业ERP完整版 2026", layout="wide")
-
-if "user_role" not in st.session_state:
-    st.session_state["user_role"] = None
+# --- 1. 初始化 Session State (必须放在最前面) ---
 if "password_correct" not in st.session_state:
     st.session_state["password_correct"] = False
+if "user_role" not in st.session_state:
+    st.session_state["user_role"] = None
+
+# --- 2. 基础配置 ---
+st.set_page_config(page_title="铝业ERP系统", layout="wide")
+
 def get_beijing_time():
     return datetime.now(timezone(timedelta(hours=8)))
 
+# 安全读取 Secrets 的函数
 @st.cache_resource
 def get_engine():
-    return create_engine(st.secrets["db_uri"], pool_pre_ping=True)
+    try:
+        # 确保能读取到 db_uri
+        db_url = st.secrets["db_uri"]
+        return create_engine(db_url, pool_pre_ping=True)
+    except Exception as e:
+        st.error("❌ 数据库配置读取失败，请检查 Secrets 中的 db_uri")
+        return None
 
 engine = get_engine()
 
-# --- 2. 权限登录 ---
+# --- 3. 权限登录 (增加安全检查) ---
 def check_password():
-    if "password_correct" not in st.session_state:
+    if not st.session_state["password_correct"]:
         st.title("🔒 铝业生产管理系统")
         u = st.text_input("账号")
         p = st.text_input("密码", type="password")
         if st.button("登录系统", width='stretch'):
-            if u == st.secrets["auth"]["admin_user"] and p == st.secrets["auth"]["admin_pass"]:
-                st.session_state["password_correct"] = True
-                st.session_state["user_role"] = "admin"
-                st.rerun()
-            elif u == st.secrets["auth"]["staff_user"] and p == st.secrets["auth"]["staff_pass"]:
-                st.session_state["password_correct"] = True
-                st.session_state["user_role"] = "staff"
-                st.rerun()
-            else:
-                st.error("账号或密码错误")
+            try:
+                # 检查 Secrets 中是否存在 auth 部分
+                auth = st.secrets["auth"]
+                if u == auth["admin_user"] and p == auth["admin_pass"]:
+                    st.session_state["password_correct"] = True
+                    st.session_state["user_role"] = "admin"
+                    st.rerun()
+                elif u == auth["staff_user"] and p == auth["staff_pass"]:
+                    st.session_state["password_correct"] = True
+                    st.session_state["user_role"] = "staff"
+                    st.rerun()
+                else:
+                    st.error("🚫 账号或密码错误")
+            except KeyError:
+                st.error("❌ 权限配置缺失：请在 Secrets 中添加 [auth] 相关项")
         return False
     return True
-
 # --- 3. 业务核心逻辑 ---
 if check_password():
     role = st.session_state["user_role"]
@@ -247,5 +260,6 @@ if check_password():
         st.header("💰 欠款对账")
         df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
         st.dataframe(df_unpaid, width='stretch', hide_index=True)
+
 
 
