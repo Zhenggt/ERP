@@ -27,6 +27,9 @@ def get_engine():
         return None
 
 engine = get_engine()
+with engine.connect() as conn:
+    conn.execute(text("UPDATE orders SET is_active = 1 WHERE is_active IS NULL"))
+    conn.commit()
 if engine:
     with engine.connect() as conn:
         try:
@@ -237,78 +240,46 @@ if check_password():
                 """
                 st.components.v1.html(bill_html, height=550)
                 st.cache_data.clear()
-  # --- 模块 D: 历史流水 ---
+ # --- 模块 D: 历史流水 (稳定版) ---
     elif menu == "🧾 业务流水":
         st.header("🧾 业务流水记录")
-        
-        # 1. 直接读取原始数据（仅读取未删除的记录，即 is_active=1）
-        df_history = pd.read_sql("SELECT * FROM orders WHERE is_active = 1 ORDER BY id DESC", engine)
-        
-        if not df_history.empty:
-            # 2. 转换时间格式
-            df_history['created_at'] = pd.to_datetime(df_history['created_at'])
-            
-            # 3. 格式化显示字符串
-            df_history['交易时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
-            
-            # 4. 汉化状态图标
-            status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
-            df_history['付款状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
-            
-            # 5. 定义要显示的列
-            display_cols = {
-                'id': 'ID',
-                '交易时间': '时间',
-                'type': '类型',
-                'customer': '客户',
-                'product': '货品',
-                'num': '重量',
-                'total_amount': '金额',
-                '付款状态': '状态'
-            }
-            
-            # 6. 渲染表格
-            st.dataframe(
-                df_history[list(display_cols.keys())].rename(columns=display_cols),
-                width='stretch',
-                hide_index=True
-            )
 
-            # --- 下面是管理员删除功能区，注意缩进 ---
-            if role == "admin":
-                st.divider()
-                with st.expander("🗑️ 危险操作：删除错误记录"):
-                    st.warning("点击后记录将移入回收站，库存将自动返还。")
-                    del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
-                    
-                    if st.button("确认删除并返还库存", type="primary", width='stretch'):               
-                        if del_id > 0:
-                            with engine.connect() as conn:
-                                # 1. 查询订单
-                                query = text("SELECT product, num FROM orders WHERE id = :id AND is_active = 1")
-                                order = conn.execute(query, {"id": del_id}).fetchone()
-                                
-                                if order:
-                                    p_display, n_val = order[0], order[1]
-                                    p_parts = p_display.split(" | ")
-                                    p_n = p_parts[0]
-                                    p_s = p_parts[1] if len(p_parts) > 1 else "标准"
-                                    
-                                    # 2. 补回库存
-                                    conn.execute(text("UPDATE products SET stock = stock + :n WHERE name = :p AND spec = :s"), 
-                                                 {"n": n_val, "p": p_n, "s": p_s})
-                                    
-                                    # 3. 移入回收站
-                                    conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), 
-                                                 {"id": del_id})
-                                    
-                                    conn.commit()
-                                    st.success(f"✅ ID {del_id} 已成功移入回收站")
-                                    st.rerun()
-                                else:
-                                    st.error("找不到该有效记录 ID")
+        # 1. 获取数据（包含字段补齐检查）
+        try:
+            df_history = pd.read_sql("SELECT * FROM orders WHERE is_active = 1 ORDER BY id DESC", engine)
+        except Exception as e:
+            # 如果报错，说明数据库还没准备好，显示所有数据作为保底
+            df_history = pd.read_sql("SELECT * FROM orders ORDER BY id DESC", engine)
+
+        # 2. 渲染表格
+        if not df_history.empty:
+            # 时间转换与格式化
+            df_history['created_at'] = pd.to_datetime(df_history['created_at'])
+            df_history['时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
+            
+            # 状态汉化
+            status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
+            df_history['状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
+            
+            # 只选要显示的列
+            show_df = df_history[['id', '时间', 'type', 'customer', 'product', 'num', 'total_amount', '状态']]
+            st.dataframe(show_df, width='stretch', hide_index=True)
         else:
-            st.info("暂无业务流水记录。")
+            st.info("💡 目前没有有效的流水记录。")
+
+        # 3. 管理员删除区（独立于表格显示，保证一直能看到）
+        if role == "admin":
+            st.divider()
+            with st.expander("🗑️ 危险操作：删除错误记录"):
+                del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
+                if st.button("确认移入回收站", type="primary"):
+                    if del_id > 0:
+                        with engine.connect() as conn:
+                            # 逻辑删除：改状态不删数据
+                            conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), {"id": del_id})
+                            conn.commit()
+                            st.success(f"ID {del_id} 已移入回收站")
+                            st.rerun()
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息管理")
@@ -500,6 +471,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
