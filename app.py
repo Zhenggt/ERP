@@ -241,26 +241,30 @@ if check_password():
                 st.components.v1.html(bill_html, height=550)
                 st.cache_data.clear()
  # --- 模块 D: 历史流水 (稳定版) ---
-  elif "流水" in menu:
+ # --- 模块 D: 历史流水 (标准修复版) ---
+    elif "流水" in menu:
         st.header("🧾 业务流水记录")
 
+        # 1. 数据读取 (修正 PostgreSQL 语法错误)
         try:
-            # 修正后的 SQL：查询不是 0 的记录（即 1 或 NULL）
+            # 这里的 (is_active != 0 OR is_active IS NULL) 确保能读到正常数据和老数据
             query = "SELECT * FROM orders WHERE (is_active != 0 OR is_active IS NULL) ORDER BY id DESC"
             df_history = pd.read_sql(query, engine)
             
             if not df_history.empty:
-                # 转换时间格式
+                # 2. 数据处理与汉化
+                # 转换时间
                 df_history['created_at'] = pd.to_datetime(df_history['created_at'])
                 df_history['时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
                 
                 # 状态映射
                 status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
-                # 确保字段名正确，如果不确定字段名，可以使用 get 方法
                 if 'payment_status' in df_history.columns:
-                    df_history['付款状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
-                
-                # 字段汉化显示
+                    df_history['状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
+                else:
+                    df_history['状态'] = '未知'
+
+                # 定义显示的列名映射
                 display_cols = {
                     'id': 'ID',
                     '时间': '时间',
@@ -268,27 +272,46 @@ if check_password():
                     'customer': '客户',
                     'product': '货品',
                     'num': '数量',
-                    'total_amount': '金额'
+                    'total_amount': '金额',
+                    '状态': '状态'
                 }
-                if '付款状态' in df_history.columns:
-                    display_cols['付款状态'] = '状态'
                 
-                # 仅显示存在的列
-                final_df = df_history.rename(columns=display_cols)
-                cols_to_show = [c for c in display_cols.values() if c in final_df.columns]
-                
-                st.dataframe(final_df[cols_to_show], use_container_width=True, hide_index=True)
+                # 过滤出数据库中实际存在的列，防止报错
+                available_cols = [col for col in display_cols.keys() if col in df_history.columns]
+                # 最终要显示的 DataFrame
+                show_df = df_history[available_cols].rename(columns=display_cols)
+
+                # 3. 渲染表格
+                st.dataframe(show_df, use_container_width=True, hide_index=True)
             else:
                 st.info("💡 暂无有效的业务流水记录。")
 
         except Exception as e:
             st.error(f"❌ 数据库读取异常: {e}")
-            # 保底方案：如果还是报错，直接显示前10条原始数据，帮我们定位问题
-            st.write("尝试读取原始数据（前10条）进行诊断：")
-            try:
-                st.dataframe(pd.read_sql("SELECT * FROM orders LIMIT 10", engine))
-            except:
-                st.write("无法连接到数据库表。")
+            # 保底方案：如果出错，显示原始数据的前 5 条
+            st.write("数据保底显示：")
+            st.dataframe(pd.read_sql("SELECT * FROM orders LIMIT 5", engine))
+
+        # 4. 管理员删除功能区 (缩进必须在 elif 内部)
+        if role == "admin":
+            st.markdown("---")
+            with st.expander("🗑️ 管理员：移入回收站"):
+                st.warning("提示：删除记录后库存将自动返还。")
+                
+                # 使用 columns 布局让输入框和按钮更整齐
+                col_id, col_btn = st.columns([2, 1])
+                with col_id:
+                    del_id = st.number_input("请输入 ID", step=1, value=0, key="admin_del_id")
+                with col_btn:
+                    st.write("##") # 占位对齐
+                    if st.button("确认移入", type="primary", use_container_width=True):
+                        if del_id > 0:
+                            with engine.connect() as conn:
+                                # 核心：将 is_active 置为 0
+                                conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), {"id": del_id})
+                                conn.commit()
+                            st.success(f"✅ ID {del_id} 已成功移入回收站")
+                            st.rerun()
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息管理")
@@ -480,6 +503,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
