@@ -242,70 +242,27 @@ if check_password():
                 st.cache_data.clear()
  # --- 模块 D: 历史流水 (稳定版) ---
     elif menu == "🧾 业务流水":
+        # --- 调试点 A ---
+        st.write("DEBUG: 已经进入业务流水模块") 
+
         st.header("🧾 业务流水记录")
 
-        # --- 步骤 1: 尝试读取数据 ---
         try:
-            # 兼容性查询：读取 is_active 为 1 或 NULL 的数据
-            query = "SELECT * FROM orders WHERE is_active IS DISTINCT FROM 0 ORDER BY id DESC"
+            # --- 调试点 B ---
+            st.write("DEBUG: 正在尝试连接数据库...")
+            query = "SELECT * FROM orders ORDER BY id DESC" # 先不加过滤，看能不能出数
             df_history = pd.read_sql(query, engine)
+            st.write(f"DEBUG: 数据库读取成功，共 {len(df_history)} 条数据")
         except Exception as e:
-            st.error(f"⚠️ 数据库读取失败: {e}")
-            df_history = pd.DataFrame() # 报错时给个空表防止崩溃
+            st.error(f"❌ 数据库读取崩溃: {e}")
+            df_history = pd.DataFrame()
 
-        # --- 步骤 2: 渲染表格 ---
         if not df_history.empty:
-            try:
-                # 时间格式化
-                df_history['created_at'] = pd.to_datetime(df_history['created_at'])
-                df_history['时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
-                
-                # 状态汉化映射
-                status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
-                df_history['状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
-                
-                # 定义要显示的列（请确保这些字段名在你的数据库里都有）
-                # 如果你的字段名是 'num' 而不是 '重量'，请在这里核对
-                display_cols = {
-                    'id': 'ID',
-                    '时间': '时间',
-                    'type': '类型',
-                    'customer': '客户',
-                    'product': '货品',
-                    'num': '数量',
-                    'total_amount': '金额',
-                    '状态': '状态'
-                }
-                
-                # 过滤并重命名列
-                final_df = df_history.rename(columns=display_cols)
-                # 只显示存在的列，防止因为字段缺失报错
-                existing_cols = [c for c in display_cols.values() if c in final_df.columns]
-                
-                st.dataframe(final_df[existing_cols], use_container_width=True, hide_index=True)
-            except Exception as e:
-                st.warning("数据解析微调中，暂以原始格式显示...")
-                st.dataframe(df_history) # 最终保底：直接喷出原始表
+            # 直接喷出原始表格，不搞任何修饰
+            st.write("DEBUG: 准备显示表格")
+            st.dataframe(df_history)
         else:
-            st.info("💡 当前没有任何流水记录。")
-
-        # --- 步骤 3: 管理员专用删除区 (注意缩进) ---
-        if role == "admin":
-            st.markdown("---")
-            with st.expander("🗑️ 记录维护 (管理员专用)"):
-                st.write("输入 ID 将记录移入回收站：")
-                del_id = st.number_input("记录 ID", step=1, value=0, key="clean_del_id")
-                
-                if st.button("移入回收站", type="primary"):
-                    if del_id > 0:
-                        try:
-                            with engine.connect() as conn:
-                                conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), {"id": del_id})
-                                conn.commit()
-                            st.success(f"ID {del_id} 已移入回收站")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"操作失败: {e}")
+            st.warning("DEBUG: 数据库是空的，或者读取到了空表")
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息管理")
@@ -497,6 +454,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
