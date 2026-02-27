@@ -434,6 +434,7 @@ if check_password():
         tab_order, tab_cust = st.tabs(["📄 订单回收站", "👥 客户回收站"])
 
         with tab_order:
+            # 读取数据
             df_trash_o = pd.read_sql("""
                 SELECT id, created_at, type, customer, product, num, total_amount 
                 FROM orders 
@@ -442,7 +443,17 @@ if check_password():
             """, engine)
             
             if not df_trash_o.empty:
-                st.dataframe(df_trash_o, width='stretch', hide_index=True)
+                # --- 🕒 核心修复代码：转换为北京时间 ---
+                df_trash_o['created_at'] = pd.to_datetime(df_trash_o['created_at'])
+                # 增加 8 小时时差
+                df_trash_o['created_at'] = df_trash_o['created_at'] + pd.Timedelta(hours=8)
+                # 格式化显示
+                df_trash_o['时间'] = df_trash_o['created_at'].dt.strftime('%Y-%m-%d %H:%M')
+                
+                # 重新排序列，隐藏原始的 created_at，显示格式化后的“时间”
+                display_df = df_trash_o[['id', '时间', 'type', 'customer', 'product', 'num', 'total_amount']]
+                st.dataframe(display_df, width='stretch', hide_index=True)
+                # --- 修复结束 ---
                 
                 c1, c2 = st.columns(2)
                 with c1:
@@ -492,6 +503,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
