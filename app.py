@@ -27,7 +27,20 @@ def get_engine():
         return None
 
 engine = get_engine()
-
+if engine:
+    with engine.connect() as conn:
+        try:
+            # 1. 给 orders 表增加 is_active 字段 (1为正常, 0为回收站)
+            conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1"))
+            
+            # 2. 给 customers 表增加 is_active 字段
+            conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1"))
+            
+            # 提交更改
+            conn.commit()
+        except Exception as e:
+            # 如果报错可能是因为权限问题，或者字段已存在但数据库不支持 IF NOT EXISTS
+            st.warning(f"数据库结构自动检查中... (若已手动升级请忽略: {e})")
 # --- 3. 权限登录 (增加安全检查) ---
 def check_password():
     if not st.session_state["password_correct"]:
@@ -475,6 +488,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
