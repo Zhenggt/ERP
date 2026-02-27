@@ -434,7 +434,7 @@ if check_password():
         tab_order, tab_cust = st.tabs(["📄 订单回收站", "👥 客户回收站"])
 
         with tab_order:
-            # 读取数据
+            # 1. 从数据库读取原始数据
             df_trash_o = pd.read_sql("""
                 SELECT id, created_at, type, customer, product, num, total_amount 
                 FROM orders 
@@ -443,17 +443,30 @@ if check_password():
             """, engine)
             
             if not df_trash_o.empty:
-                # --- 🕒 核心修复代码：转换为北京时间 ---
-                df_trash_o['created_at'] = pd.to_datetime(df_trash_o['created_at'])
-                # 增加 8 小时时差
-                df_trash_o['created_at'] = df_trash_o['created_at'] + pd.Timedelta(hours=8)
-                # 格式化显示
-                df_trash_o['时间'] = df_trash_o['created_at'].dt.strftime('%Y-%m-%d %H:%M')
+                # 2. 时间修正（转为北京时间并格式化）
+                df_trash_o['created_at'] = pd.to_datetime(df_trash_o['created_at']) + pd.Timedelta(hours=8)
+                df_trash_o['删除时间'] = df_trash_o['created_at'].dt.strftime('%Y-%m-%d %H:%M')
                 
-                # 重新排序列，隐藏原始的 created_at，显示格式化后的“时间”
-                display_df = df_trash_o[['id', '时间', 'type', 'customer', 'product', 'num', 'total_amount']]
-                st.dataframe(display_df, width='stretch', hide_index=True)
-                # --- 修复结束 ---
+                # 3. 定义汉化映射字典
+                # 把数据库字段名 (Key) 映射为你想显示的中文名 (Value)
+                column_mapping = {
+                    'id': '记录ID',
+                    '删除时间': '删除时间',
+                    'type': '类型',
+                    'customer': '客户名称',
+                    'product': '货品规格',
+                    'num': '数量/重量',
+                    'total_amount': '金额'
+                }
+                
+                # 4. 筛选并重命名列
+                # 只取映射字典里有的列，并重命名
+                df_display = df_trash_o[list(column_mapping.keys())].rename(columns=column_mapping)
+                
+                # 5. 渲染表格 (适配 2026 版 width='stretch')
+                st.dataframe(df_display, width='stretch', hide_index=True)
+                
+                # --- 下接还原/粉碎按钮逻辑 ---
                 
                 c1, c2 = st.columns(2)
                 with c1:
@@ -503,6 +516,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
