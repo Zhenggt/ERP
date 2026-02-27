@@ -490,30 +490,26 @@ if check_password():
                 df_all['created_at'] = pd.to_datetime(df_all['created_at']) + pd.Timedelta(hours=8)
                 df_all['日期'] = df_all['created_at'].dt.date
 
-                # --- B. 利润核算：提取采购成本 ---
-                # 匹配包含“入”或“采购”的记录
+                # --- B. 成本核算：修复 Pandas GroupBy 警告 ---
                 df_purchase = df_all[df_all['type'].str.contains('入|采购', na=False)]
                 cost_dict = {}
                 if not df_purchase.empty:
-                    # 计算每个货品的加权平均进价
-                    cost_dict = df_purchase.groupby('product').apply(
-                        lambda x: x['total_amount'].sum() / x['num'].sum() if x['num'].sum() > 0 else 0
-                    ).to_dict()
+                    # 适配新版 Pandas：先选取需要的列再进行聚合，避免 apply 警告
+                    cost_summary = df_purchase.groupby('product')[['total_amount', 'num']].sum()
+                    cost_dict = (cost_summary['total_amount'] / cost_summary['num']).to_dict()
 
                 # --- C. 销售数据提取 ---
-                # 匹配包含“出”或“销售”的记录，确保同步到所有过往数据
                 df_sales = df_all[df_all['type'].str.contains('出|销售', na=False)].copy()
 
                 if df_sales.empty:
-                    st.error("❌ 未找到销售记录。请检查流水中的“类型”列是否包含‘销售’字样。")
-                    st.write("当前数据库存在的类型：", df_all['type'].unique())
+                    st.error("❌ 未找到销售记录。请检查流水类型。")
                 else:
-                    # 计算每笔利润：销售额 - (数量 * 进价成本)
+                    # 计算每笔利润
                     df_sales['单价'] = df_sales['total_amount'] / df_sales['num']
                     df_sales['成本单价'] = df_sales['product'].map(cost_dict).fillna(df_sales['单价'] * 0.8)
                     df_sales['纯利润'] = df_sales['total_amount'] - (df_sales['成本单价'] * df_sales['num'])
 
-                    # --- 2. 核心指标卡 (全中文) ---
+                    # --- 2. 核心指标卡 ---
                     total_rev = df_sales['total_amount'].sum()
                     total_profit = df_sales['纯利润'].sum()
                     unpaid_rev = df_sales[df_sales['payment_status'] == 'unpaid']['total_amount'].sum()
@@ -525,14 +521,13 @@ if check_password():
 
                     st.divider()
 
-                    # --- 3. 每日销售走势 (折线图优化) ---
+                    # --- 3. 每日销售走势 (适配 2026 width='stretch') ---
                     st.subheader("📈 每日营业额走势")
-                    # 按日期聚合当日总销售额
                     daily_data = df_sales.groupby('日期')['total_amount'].sum().reset_index()
                     daily_data.columns = ['日期', '当日销售额']
                     
-                    # 渲染折线图：横轴为日期，纵轴为当日销售额
-                    st.line_chart(daily_data.set_index('日期'), use_container_width=True)
+                    # 核心更新：使用 width='stretch' 替代过时的 use_container_width
+                    st.line_chart(daily_data.set_index('日期'), width='stretch')
 
                     # --- 4. 盈利贡献详情表 ---
                     st.subheader("📋 货品盈利排行榜")
@@ -551,7 +546,7 @@ if check_password():
                             "销售额": st.column_config.NumberColumn("销售额", format="¥%.2f"),
                             "利润": st.column_config.NumberColumn("利润", format="¥%.2f"),
                         },
-                        width='stretch',
+                        width='stretch', # 核心更新：适配 2026 规范
                         hide_index=True
                     )
 
@@ -647,6 +642,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
