@@ -411,7 +411,6 @@ if check_password():
 # --- 模块 G: 回收站 (逻辑删除管理) ---
     elif menu == "♻️ 回收站":
         st.header("♻️ 数据回收站")
-        st.markdown("---")
         
         # 使用标签页区分 订单 和 客户
         tab_order, tab_cust = st.tabs(["📄 订单回收站", "👥 客户回收站"])
@@ -476,5 +475,6 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
