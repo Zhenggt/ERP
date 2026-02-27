@@ -153,8 +153,7 @@ if check_password():
                 elif in_num <= 0:
                     st.error("⚠️ 入库数量必须大于 0！")
                 else:
-                    try:
-                        # 使用 begin() 开启事务，确保库存和流水同步写入
+                   try:
                         with engine.begin() as conn:
                             # 1. 检查并创建货品
                             conn.execute(text("""
@@ -167,12 +166,11 @@ if check_password():
 
                             # 2. 增加库存
                             conn.execute(text("""
-                                UPDATE products 
-                                SET stock = stock + :n 
+                                UPDATE products SET stock = stock + :n 
                                 WHERE name = :p AND spec = :s
                             """), {"n": in_num, "p": p_name, "s": p_spec})
                             
-                            # 3. 写入流水 (显式加入 created_at 确保时间记录)
+                            # 3. 写入流水
                             conn.execute(text("""
                                 INSERT INTO orders (type, customer, product, num, total_amount, payment_status, is_active, created_at)
                                 VALUES ('采购入库', :supplier, :product, :num, :amount, 'paid', 1, NOW())
@@ -183,8 +181,12 @@ if check_password():
                                 "amount": in_num * in_price
                             })
                         
-                        st.success(f"✅ 入库成功！\n货品：{p_name} ({p_spec})\n供应商：{supplier}")
-                        st.rerun() # 刷新界面以更新显示
+                        # --- 简洁版成功提示 ---
+                        st.success(f"✅ 入库成功：{supplier} | {p_name} | {in_num}公斤")
+                        
+                        import time
+                        time.sleep(1.5) # 停留1.5秒方便确认，随后自动刷新清空输入框
+                        st.rerun()
                         
                     except Exception as e:
                         st.error(f"❌ 系统错误: {e}")
@@ -575,6 +577,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
