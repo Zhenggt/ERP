@@ -200,20 +200,60 @@ if check_password():
                         conn.commit()
                     st.rerun()
 
-    # --- E. 客户档案 ---
+    # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息管理")
-        with st.form("add_cust"):
-            c_n = st.text_input("客户名称")
-            c_p = st.text_input("联系电话")
-            c_a = st.text_input("地址")
-            if st.form_submit_button("添加客户", width='stretch'):
-                with engine.connect() as conn:
-                    conn.execute(text("INSERT INTO customers (name, phone, address) VALUES (:n, :p, :a)"), {"n": c_n, "p": c_p, "a": c_a})
-                    conn.commit()
-                st.success("添加成功")
-        df_cust = pd.read_sql("SELECT * FROM customers", engine)
-        st.dataframe(df_cust, width='stretch', hide_index=True)
+        
+        # 自动检查并添加备注字段（防止报错）
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS remark TEXT"))
+            conn.commit()
+
+        # 1. 新增客户表单
+        with st.form("add_cust", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                c_n = st.text_input("客户名称 (必填)")
+                c_p = st.text_input("联系电话")
+            with col2:
+                c_a = st.text_input("收货地址")
+                c_r = st.text_input("客户备注 (如：优惠级别、特殊要求)")
+            
+            if st.form_submit_button("➕ 添加新客户", width='stretch'):
+                if c_n:
+                    with engine.connect() as conn:
+                        conn.execute(text("""
+                            INSERT INTO customers (name, phone, address, remark) 
+                            VALUES (:n, :p, :a, :r)
+                        """), {"n": c_n, "p": c_p, "a": c_a, "r": c_r})
+                        conn.commit()
+                    st.success(f"✅ 客户 {c_n} 已录入档案")
+                    st.cache_data.clear()
+                else:
+                    st.error("请输入客户名称")
+
+        st.divider()
+
+        # 2. 客户列表显示
+        st.subheader("📋 客户名录")
+        df_cust = pd.read_sql("SELECT name as 客户名称, phone as 电话, address as 地址, remark as 备注 FROM customers", engine)
+        
+        if not df_cust.empty:
+            # 使用 width='stretch' 适配 2026 最新版本
+            st.dataframe(df_cust, width='stretch', hide_index=True)
+            
+            # 3. 删除功能 (仅管理员可见)
+            if role == "admin":
+                with st.expander("🗑️ 删除客户资料"):
+                    del_name = st.selectbox("选择要删除的客户", df_cust['客户名称'].tolist())
+                    if st.button(f"确认删除 {del_name}", type="primary"):
+                        with engine.connect() as conn:
+                            conn.execute(text("DELETE FROM customers WHERE name = :n"), {"n": del_name})
+                            conn.commit()
+                        st.success("删除成功")
+                        st.rerun()
+        else:
+            st.info("目前还没有录入任何客户。")
 
     # --- F. 订单审核 ---
     elif menu == "🔔 订单审核":
@@ -230,6 +270,7 @@ if check_password():
         st.header("💰 欠款对账")
         df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
         st.dataframe(df_unpaid, width='stretch', hide_index=True)
+
 
 
 
