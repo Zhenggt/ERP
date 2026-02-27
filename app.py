@@ -116,7 +116,19 @@ if check_password():
                         conn.execute(text("INSERT INTO orders (type, customer, product, num, price, total_amount, payment_status) VALUES ('销售', :c, :p, :n, :pr, :t, :ps)"), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total, "ps": p_status})
                         conn.commit()
                     st.success("出库成功！")
-                    # 这里可以插入之前提供的 HTML 打印代码... (篇幅原因略)
+                    bill_html = f"""
+                    <div id="bill" style="border:1px dashed #000; padding:10px; background:#fff; color:#000;">
+                        <h2 style="text-align:center;">销售出库单</h2>
+                        <p>客户: {t_c} | 日期: {get_beijing_time().strftime('%Y-%m-%d')}</p>
+                        <hr>
+                        <p>货品: {s_o} | 重量: {num}kg | 单价: {price}元</p>
+                        <p><strong>合计金额: {total} 元</strong></p>
+                        <p style="text-align:right;">签字：_________</p>
+                    </div>
+                    <button onclick="window.print()">🖨️ 打印单据</button>
+                    """
+                    import streamlit.components.v1 as components
+                    components.html(bill_html, height=300)
 
     # --- D. 财务对账 (管理员可见) ---
     elif menu == "💰 财务对账" and role == "admin":
@@ -143,4 +155,5 @@ if check_password():
         df_stats = pd.read_sql("SELECT SUM(total_amount) as total FROM orders WHERE type='销售' AND created_at >= date_trunc('month', current_date)", engine)
         st.metric("本月累计销售额", f"¥ {df_stats['total'].iloc[0] or 0:,.2f}")
         # 这里可以加入 line_chart 绘制趋势图
+
 
