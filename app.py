@@ -298,80 +298,89 @@ if check_password():
                 """
                 st.components.v1.html(bill_html, height=550)
                 st.cache_data.clear()
-# --- 模块 D: 历史流水 ---
+# --- 模块 D: 历史流水 (交互编辑版) ---
     elif "流水" in menu:
         st.header("🧾 业务流水记录")
+        st.info("💡 提示：双击“状态”列可直接修改，选中行后按 Delete 可标记删除，最后请点击下方【保存修改】。")
 
         try:
-            # 1. 数据读取
-            query = "SELECT * FROM orders WHERE (is_active != 0 OR is_active IS NULL) ORDER BY id DESC"
+            # 1. 获取数据
+            query = "SELECT id, created_at, type, customer, product, num, total_amount, payment_status FROM orders WHERE (is_active != 0 OR is_active IS NULL) ORDER BY id DESC"
             df_history = pd.read_sql(query, engine)
             
             if not df_history.empty:
-                # 2. 数据格式化处理
-                # 修正北京时间时差 (+8小时)
+                # 时间修正
                 df_history['created_at'] = pd.to_datetime(df_history['created_at']) + pd.Timedelta(hours=8)
                 df_history['时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
                 
-                # 状态映射
-                status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
-                if 'payment_status' in df_history.columns:
-                    df_history['状态显示'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
-                else:
-                    df_history['状态显示'] = '未知'
+                # 定义状态选项
+                status_options = ["paid", "unpaid", "pending"]
+                status_display = {"paid": "✅ 已结", "unpaid": "❌ 欠款", "pending": "⏳ 待审"}
 
-                # 定义显示的列名（将 customer 改为 客户/供应商）
-                display_cols = {
-                    'id': 'ID',
-                    '时间': '时间',
-                    'type': '类型',
-                    'customer': '客户/供应商',
-                    'product': '货品',
-                    'num': '数量',
-                    'total_amount': '金额',
-                    '状态显示': '状态'
-                }
-                
-                # 过滤并重命名
-                available_cols = [col for col in display_cols.keys() if col in df_history.columns]
-                show_df = df_history[available_cols].rename(columns=display_cols)
+                # 准备编辑用的表格（隐藏原始时间列，保留格式化后的时间）
+                df_to_edit = df_history[['id', '时间', 'type', 'customer', 'product', 'num', 'total_amount', 'payment_status']]
 
-                # 3. 渲染表格
-                st.dataframe(show_df, width='stretch', hide_index=True)
+                # 2. 使用 st.data_editor 进行交互
+                edited_df = st.data_editor(
+                    df_to_edit,
+                    column_config={
+                        "id": st.column_config.NumberColumn("ID", disabled=True), # ID 不允许改
+                        "时间": st.column_config.TextColumn("时间", disabled=True),
+                        "type": st.column_config.TextColumn("类型", disabled=True),
+                        "customer": st.column_config.TextColumn("客户/供应商"),
+                        "product": st.column_config.TextColumn("货品"),
+                        "num": st.column_config.NumberColumn("数量"),
+                        "total_amount": st.column_config.NumberColumn("金额"),
+                        "payment_status": st.column_config.SelectboxColumn(
+                            "状态",
+                            options=status_options,
+                            required=True,
+                            # 这里显示人类可读的标签
+                            format=lambda x: status_display.get(x, x) 
+                        )
+                    },
+                    width='stretch',
+                    hide_index=True,
+                    num_rows="dynamic" # 允许删除行
+                )
 
-                # --- 🚀 核心新增：状态管理工具 ---
-                st.divider()
-                with st.expander("📝 状态快速修改"):
-                    st.write("请根据上方表格显示的 **ID** 进行修改")
-                    c1, c2, c3 = st.columns([1, 1, 1])
-                    
-                    with c1:
-                        edit_id = st.number_input("记录 ID", step=1, value=0, key="edit_flow_id")
-                    with c2:
-                        target_text = st.selectbox("修改状态为", ["✅ 已结", "❌ 欠款", "⏳ 待审"])
-                        # 转换回数据库字段
-                        rev_map = {"✅ 已结": "paid", "❌ 欠款": "unpaid", "⏳ 待审": "pending"}
-                    with c3:
-                        st.write("##") # 补齐高度对齐按钮
-                        if st.button("更新状态", type="primary", width='stretch'):
-                            if edit_id > 0:
-                                with engine.begin() as conn:
-                                    conn.execute(
-                                        text("UPDATE orders SET payment_status = :s WHERE id = :id"),
-                                        {"s": rev_map[target_text], "id": edit_id}
-                                    )
-                                st.success(f"✅ ID {edit_id} 已标记为 {target_text}")
-                                import time
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.warning("请输入有效的记录 ID")
+                # 3. 保存逻辑
+                if st.button("💾 保存表格中的所有修改", type="primary", width='stretch'):
+                    # 找出被删除的 ID
+                    current_ids = edited_df['id'].tolist()
+                    original_ids = df_to_edit['id'].tolist()
+                    deleted_ids = list(set(original_ids) - set(current_ids))
+
+                    # 找出被修改的数据
+                    # 这里为了简化，我们采用全量覆盖或对比更新
+                    try:
+                        with engine.begin() as conn:
+                            # A. 处理删除 (逻辑删除)
+                            if deleted_ids:
+                                conn.execute(text("UPDATE orders SET is_active = 0 WHERE id IN :ids"), {"ids": tuple(deleted_ids)})
+                            
+                            # B. 处理修改 (更新每一行)
+                            for index, row in edited_df.iterrows():
+                                conn.execute(text("""
+                                    UPDATE orders SET 
+                                    customer = :c, product = :p, num = :n, 
+                                    total_amount = :a, payment_status = :s 
+                                    WHERE id = :id
+                                """), {
+                                    "c": row['customer'], "p": row['product'], 
+                                    "n": row['num'], "a": row['total_amount'], 
+                                    "s": row['payment_status'], "id": row['id']
+                                })
+                        st.success("🎉 数据已实时同步到数据库！")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"保存失败: {e}")
+
             else:
-                st.info("💡 暂无有效的业务流水记录。")
+                st.info("💡 暂无业务流水记录。")
 
         except Exception as e:
             st.error(f"❌ 数据库读取异常: {e}")
-
         # 4. 管理员功能区
         if role == "admin":
             st.markdown("---")
@@ -603,6 +612,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
