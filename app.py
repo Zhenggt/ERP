@@ -424,9 +424,25 @@ if check_password():
                     if st.button("🔥 彻底粉碎（不可恢复）", type="primary", width='stretch'):
                         if del_o_id > 0:
                             with engine.connect() as conn:
-                                conn.execute(text("DELETE FROM orders WHERE id = :id"), {"id": del_
+                                conn.execute(text("DELETE FROM orders WHERE id = :id"), {"id": del_o_id})
+                                conn.commit()
+                            st.error(f"💀 ID {del_o_id} 已永久删除")
+                            st.rerun()
+            else:
+                st.info("订单回收站目前是空的。")
 
-
-
-
-
+        with tab_cust:
+            # 读取 is_active = 0 的客户
+            df_trash_c = pd.read_sql("SELECT name, phone, address, remark FROM customers WHERE is_active = 0", engine)
+            
+            if not df_trash_c.empty:
+                st.dataframe(df_trash_c, width='stretch', hide_index=True)
+                res_c_name = st.selectbox("选择要还原的客户", df_trash_c['name'].tolist())
+                if st.button("⏪ 还原该客户资料"):
+                    with engine.connect() as conn:
+                        conn.execute(text("UPDATE customers SET is_active = 1 WHERE name = :n"), {"n": res_c_name})
+                        conn.commit()
+                    st.success(f"✅ 客户 {res_c_name} 已重新回到档案库")
+                    st.rerun()
+            else:
+                st.write("客户回收站没有记录。")
