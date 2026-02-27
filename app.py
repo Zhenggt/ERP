@@ -113,49 +113,45 @@ if check_password():
         st.dataframe(df, width='stretch', hide_index=True)
 
   # --- 模块 B: 采购入库 (优化排版版) ---
+    # --- 模块 B: 采购入库 ---
     elif menu == "📥 采购入库":
         st.header("📥 采购入库登记")
         
-        with st.form("purchase_form_v2", clear_on_submit=True):
-            st.info("💡 提示：名称和规格均可手动输入。如果库存中不存在该货品，系统将自动创建。")
+        # 1. 输入表单区块
+        with st.form("purchase_form_clean", clear_on_submit=True):
+            # 供应商信息
+            supplier = st.text_input("🚚 供应商名称", placeholder="填写厂家或发货方全称")
             
-            # 第一段：供应商信息
-            st.markdown("##### 1. 来源信息")
-            supplier = st.text_input("🚚 供应商名称", placeholder="填写厂家或供应商全称")
+            st.write("") # 增加微量间距
             
-            st.divider()
-            
-            # 第二段：货品详情
-            st.markdown("##### 2. 货品详情")
+            # 货品信息并行排列
             col_p, col_s = st.columns(2)
             with col_p:
                 p_name = st.text_input("货品名称", placeholder="如：铝板")
             with col_s:
                 p_spec = st.text_input("规格型号", placeholder="如：6061 / 标准")
             
-            st.divider()
-            
-            # 第三段：数量与金额
-            st.markdown("##### 3. 入库数据")
+            # 数量金额并行排列
             col_n, col_pr = st.columns(2)
             with col_n:
                 in_num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.01, format="%.2f")
             with col_pr:
                 in_price = st.number_input("进货单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
 
-            # 提交按钮
+            # 提交按钮（适配 2026 最新 width 规范）
             submit_btn = st.form_submit_button("确认提交入库", type="primary", width='stretch')
 
+            # 2. 提交处理逻辑
             if submit_btn:
-                # 基础校验
                 if not supplier or not p_name:
-                    st.error("⚠️ 供应商和货品名称不能为空！")
+                    st.error("⚠️ 错误：供应商和货品名称不能为空！")
                 elif in_num <= 0:
-                    st.error("⚠️ 入库数量必须大于 0！")
+                    st.error("⚠️ 错误：入库数量必须大于 0！")
                 else:
-                   try:
+                    try:
+                        # 使用 begin() 开启事务：确保库存更新与流水写入【同时成功】
                         with engine.begin() as conn:
-                            # 1. 检查并创建货品
+                            # A. 自动创建货品（若不存在）
                             conn.execute(text("""
                                 INSERT INTO products (name, spec, stock) 
                                 SELECT :p, :s, 0 
@@ -164,13 +160,13 @@ if check_password():
                                 )
                             """), {"p": p_name, "s": p_spec})
 
-                            # 2. 增加库存
+                            # B. 增加库存
                             conn.execute(text("""
                                 UPDATE products SET stock = stock + :n 
                                 WHERE name = :p AND spec = :s
                             """), {"n": in_num, "p": p_name, "s": p_spec})
                             
-                            # 3. 写入流水
+                            # C. 写入历史流水 (使用 NOW() 记录数据库当前北京时间)
                             conn.execute(text("""
                                 INSERT INTO orders (type, customer, product, num, total_amount, payment_status, is_active, created_at)
                                 VALUES ('采购入库', :supplier, :product, :num, :amount, 'paid', 1, NOW())
@@ -178,18 +174,19 @@ if check_password():
                                 "supplier": supplier,
                                 "product": f"{p_name} | {p_spec}",
                                 "num": in_num,
-                                "amount": in_num * in_price
+                                "amount": round(in_num * in_price, 2)
                             })
                         
-                        # --- 简洁版成功提示 ---
+                        # 3. 简洁反馈
                         st.success(f"✅ 入库成功：{supplier} | {p_name} | {in_num}公斤")
                         
+                        # 停留 1.5 秒后自动刷新清空表单
                         import time
-                        time.sleep(1.5) # 停留1.5秒方便确认，随后自动刷新清空输入框
+                        time.sleep(1.5)
                         st.rerun()
                         
                     except Exception as e:
-                        st.error(f"❌ 系统错误: {e}")
+                        st.error(f"❌ 系统执行失败: {e}")
     # --- C. 销售出库 ---
     elif menu == "📤 销售出库":
         st.header("📤 销售出库")
@@ -577,6 +574,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
