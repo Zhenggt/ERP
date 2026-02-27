@@ -471,50 +471,47 @@ if check_password():
         df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
         st.dataframe(df_unpaid, width='stretch', hide_index=True)
 
-# --- 模块 H: 经营看板 (全兼容精算版) ---
+# --- 模块 H: 经营看板 ---
     elif menu == "📈 经营看板":
         st.header("📈 经营数据深度分析")
         
         try:
-            # 1. 宽泛读取：读取所有记录，不设过滤，防止漏掉过往数据
+            # 1. 宽泛读取所有流水记录
             query = "SELECT * FROM orders WHERE (is_active != 0 OR is_active IS NULL)"
             df_all = pd.read_sql(query, engine)
 
             if df_all.empty:
                 st.warning("⚠️ 数据库中暂无流水记录。")
             else:
-                # --- 数据清洗 (解决同步不到数据的关键) ---
-                # 统一去除类型和货品名称前后的空格
+                # --- A. 数据清洗与北京时间对齐 ---
                 df_all['type'] = df_all['type'].str.strip()
                 df_all['product'] = df_all['product'].str.strip()
+                # 修正北京时间 (+8小时)
                 df_all['created_at'] = pd.to_datetime(df_all['created_at']) + pd.Timedelta(hours=8)
                 df_all['日期'] = df_all['created_at'].dt.date
 
-                # --- A. 成本核算逻辑 ---
-                # 只要包含“入”或“采购”字样的都计入成本参考
+                # --- B. 利润核算：提取采购成本 ---
+                # 匹配包含“入”或“采购”的记录
                 df_purchase = df_all[df_all['type'].str.contains('入|采购', na=False)]
-                
-                # 计算加权平均成本
                 cost_dict = {}
                 if not df_purchase.empty:
+                    # 计算每个货品的加权平均进价
                     cost_dict = df_purchase.groupby('product').apply(
                         lambda x: x['total_amount'].sum() / x['num'].sum() if x['num'].sum() > 0 else 0
                     ).to_dict()
 
-                # --- B. 销售数据提取 ---
-                # 只要包含“出”或“销售”字样的都计入营业额
+                # --- C. 销售数据提取 ---
+                # 匹配包含“出”或“销售”的记录，确保同步到所有过往数据
                 df_sales = df_all[df_all['type'].str.contains('出|销售', na=False)].copy()
 
                 if df_sales.empty:
-                    # 💡 数据诊断：如果没数，显示现有的类型分布，帮用户找原因
-                    st.error("❌ 未找到销售数据。请检查你的业务流水中“类型”列的文字。")
-                    st.write("当前数据库中的类型分布：", df_all['type'].unique())
+                    st.error("❌ 未找到销售记录。请检查流水中的“类型”列是否包含‘销售’字样。")
+                    st.write("当前数据库存在的类型：", df_all['type'].unique())
                 else:
-                    # 计算单笔利润
-                    # 匹配不到成本时，默认按 20% 利润率估算
+                    # 计算每笔利润：销售额 - (数量 * 进价成本)
                     df_sales['单价'] = df_sales['total_amount'] / df_sales['num']
-                    df_sales['估算成本'] = df_sales['product'].map(cost_dict).fillna(df_sales['单价'] * 0.8)
-                    df_sales['纯利润'] = df_sales['total_amount'] - (df_sales['估算成本'] * df_sales['num'])
+                    df_sales['成本单价'] = df_sales['product'].map(cost_dict).fillna(df_sales['单价'] * 0.8)
+                    df_sales['纯利润'] = df_sales['total_amount'] - (df_sales['成本单价'] * df_sales['num'])
 
                     # --- 2. 核心指标卡 (全中文) ---
                     total_rev = df_sales['total_amount'].sum()
@@ -528,24 +525,35 @@ if check_password():
 
                     st.divider()
 
-                    # --- 3. 销售趋势面积图 ---
-                    st.subheader("🗓️ 每日营业走势")
-                    trend_data = df_sales.groupby('日期').agg({'total_amount':'sum', '纯利润':'sum'}).reset_index()
-                    # 重新命名方便图表显示中文标签
-                    trend_data.columns = ['日期', '销售额', '净利润']
-                    st.area_chart(trend_data.set_index('日期'), use_container_width=True)
+                    # --- 3. 每日销售走势 (折线图优化) ---
+                    st.subheader("📈 每日营业额走势")
+                    # 按日期聚合当日总销售额
+                    daily_data = df_sales.groupby('日期')['total_amount'].sum().reset_index()
+                    daily_data.columns = ['日期', '当日销售额']
+                    
+                    # 渲染折线图：横轴为日期，纵轴为当日销售额
+                    st.line_chart(daily_data.set_index('日期'), use_container_width=True)
 
-                    # --- 4. 底部详细表 ---
-                    st.subheader("🏆 货品盈利分析")
+                    # --- 4. 盈利贡献详情表 ---
+                    st.subheader("📋 货品盈利排行榜")
                     rank_df = df_sales.groupby('product').agg({
                         'num': 'sum', 
                         'total_amount': 'sum', 
                         '纯利润': 'sum'
                     }).reset_index().rename(columns={
                         'product': '货品', 'num': '销量', 
-                        'total_amount': '销售总额', '纯利润': '净利润贡献'
+                        'total_amount': '销售额', '纯利润': '利润'
                     })
-                    st.dataframe(rank_df.sort_values('净利润贡献', ascending=False), width='stretch', hide_index=True)
+                    
+                    st.dataframe(
+                        rank_df.sort_values('利润', ascending=False),
+                        column_config={
+                            "销售额": st.column_config.NumberColumn("销售额", format="¥%.2f"),
+                            "利润": st.column_config.NumberColumn("利润", format="¥%.2f"),
+                        },
+                        width='stretch',
+                        hide_index=True
+                    )
 
         except Exception as e:
             st.error(f"❌ 看板加载失败: {e}")
@@ -639,6 +647,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
