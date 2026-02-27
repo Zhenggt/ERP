@@ -271,6 +271,56 @@ if check_password():
         df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
         st.dataframe(df_unpaid, width='stretch', hide_index=True)
 
+# --- H. 经营看板 (管理员专享) ---
+    elif menu == "📈 经营看板":
+        st.header("📈 经营数据分析")
+        
+        # 1. 从数据库读取所有销售记录
+        df_sales = pd.read_sql("""
+            SELECT created_at, total_amount, payment_status 
+            FROM orders 
+            WHERE type = '销售'
+        """, engine)
+
+        if df_sales.empty:
+            st.warning("目前还没有销售数据，请先去『销售出库』录入单据。")
+        else:
+            # 数据预处理
+            df_sales['created_at'] = pd.to_datetime(df_sales['created_at'])
+            df_sales['date'] = df_sales['created_at'].dt.date
+            
+            # 2. 核心指标卡片
+            total_rev = df_sales['total_amount'].sum()
+            paid_rev = df_sales[df_sales['payment_status'] == 'paid']['total_amount'].sum()
+            unpaid_rev = df_sales[df_sales['payment_status'] == 'unpaid']['total_amount'].sum()
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("总销售额", f"¥ {total_rev:,.2f}")
+            col2.metric("已收金额", f"¥ {paid_rev:,.2f}", delta=f"{paid_rev/total_rev*100:.1f}%" if total_rev > 0 else "0%")
+            col3.metric("待收欠款", f"¥ {unpaid_rev:,.2f}", delta=f"-{unpaid_rev/total_rev*100:.1f}%", delta_color="inverse")
+
+            st.divider()
+
+            # 3. 销售趋势图
+            st.subheader("🗓️ 每日销售走势")
+            trend_data = df_sales.groupby('date')['total_amount'].sum().reset_index()
+            st.line_chart(trend_data.set_index('date'), width='stretch')
+
+            # 4. 欠款分布（按客户）
+            st.subheader("👤 客户欠款排名")
+            df_debt = pd.read_sql("""
+                SELECT customer as 客户, SUM(total_amount) as 欠款金额 
+                FROM orders 
+                WHERE type = '销售' AND payment_status = 'unpaid'
+                GROUP BY customer
+                ORDER BY 欠款金额 DESC
+            """, engine)
+            
+            if not df_debt.empty:
+                st.bar_chart(df_debt.set_index('客户'), width='stretch')
+                st.dataframe(df_debt, width='stretch', hide_index=True)
+            else:
+                st.success("🎉 太棒了！目前没有任何客户欠款。")
 
 
 
