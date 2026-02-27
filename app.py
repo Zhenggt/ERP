@@ -244,42 +244,68 @@ if check_password():
     elif menu == "🧾 业务流水":
         st.header("🧾 业务流水记录")
 
-        # 1. 获取数据（包含字段补齐检查）
+        # --- 步骤 1: 尝试读取数据 ---
         try:
-            df_history = pd.read_sql("SELECT * FROM orders WHERE is_active = 1 ORDER BY id DESC", engine)
+            # 兼容性查询：读取 is_active 为 1 或 NULL 的数据
+            query = "SELECT * FROM orders WHERE is_active IS DISTINCT FROM 0 ORDER BY id DESC"
+            df_history = pd.read_sql(query, engine)
         except Exception as e:
-            # 如果报错，说明数据库还没准备好，显示所有数据作为保底
-            df_history = pd.read_sql("SELECT * FROM orders ORDER BY id DESC", engine)
+            st.error(f"⚠️ 数据库读取失败: {e}")
+            df_history = pd.DataFrame() # 报错时给个空表防止崩溃
 
-        # 2. 渲染表格
+        # --- 步骤 2: 渲染表格 ---
         if not df_history.empty:
-            # 时间转换与格式化
-            df_history['created_at'] = pd.to_datetime(df_history['created_at'])
-            df_history['时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
-            
-            # 状态汉化
-            status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
-            df_history['状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
-            
-            # 只选要显示的列
-            show_df = df_history[['id', '时间', 'type', 'customer', 'product', 'num', 'total_amount', '状态']]
-            st.dataframe(show_df, width='stretch', hide_index=True)
+            try:
+                # 时间格式化
+                df_history['created_at'] = pd.to_datetime(df_history['created_at'])
+                df_history['时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
+                
+                # 状态汉化映射
+                status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
+                df_history['状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
+                
+                # 定义要显示的列（请确保这些字段名在你的数据库里都有）
+                # 如果你的字段名是 'num' 而不是 '重量'，请在这里核对
+                display_cols = {
+                    'id': 'ID',
+                    '时间': '时间',
+                    'type': '类型',
+                    'customer': '客户',
+                    'product': '货品',
+                    'num': '数量',
+                    'total_amount': '金额',
+                    '状态': '状态'
+                }
+                
+                # 过滤并重命名列
+                final_df = df_history.rename(columns=display_cols)
+                # 只显示存在的列，防止因为字段缺失报错
+                existing_cols = [c for c in display_cols.values() if c in final_df.columns]
+                
+                st.dataframe(final_df[existing_cols], use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.warning("数据解析微调中，暂以原始格式显示...")
+                st.dataframe(df_history) # 最终保底：直接喷出原始表
         else:
-            st.info("💡 目前没有有效的流水记录。")
+            st.info("💡 当前没有任何流水记录。")
 
-        # 3. 管理员删除区（独立于表格显示，保证一直能看到）
+        # --- 步骤 3: 管理员专用删除区 (注意缩进) ---
         if role == "admin":
-            st.divider()
-            with st.expander("🗑️ 危险操作：删除错误记录"):
-                del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
-                if st.button("确认移入回收站", type="primary"):
+            st.markdown("---")
+            with st.expander("🗑️ 记录维护 (管理员专用)"):
+                st.write("输入 ID 将记录移入回收站：")
+                del_id = st.number_input("记录 ID", step=1, value=0, key="clean_del_id")
+                
+                if st.button("移入回收站", type="primary"):
                     if del_id > 0:
-                        with engine.connect() as conn:
-                            # 逻辑删除：改状态不删数据
-                            conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), {"id": del_id})
-                            conn.commit()
+                        try:
+                            with engine.connect() as conn:
+                                conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), {"id": del_id})
+                                conn.commit()
                             st.success(f"ID {del_id} 已移入回收站")
                             st.rerun()
+                        except Exception as e:
+                            st.error(f"操作失败: {e}")
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息管理")
@@ -471,6 +497,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
