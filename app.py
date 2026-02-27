@@ -280,13 +280,13 @@ if check_password():
             )
 
         # 在“历史流水”模块，管理员删除功能区
-            if role == "admin":
+        if role == "admin":
+        # --- 下面的每一行都要比 if 往右缩进 4 个空格 ---
         st.divider()
         with st.expander("🗑️ 危险操作：删除错误记录"):
             st.warning("点击后记录将移入回收站，库存将自动返还。")
             del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
             
-            # 注意：按钮必须在 expander 的缩进范围内
             if st.button("确认删除并返还库存", type="primary", width='stretch'):               
                 if del_id > 0:
                     with engine.connect() as conn:
@@ -296,25 +296,23 @@ if check_password():
                         
                         if order:
                             p_display, n_val = order[0], order[1]
-                            # 拆分品名和规格
                             p_parts = p_display.split(" | ")
                             p_n = p_parts[0]
                             p_s = p_parts[1] if len(p_parts) > 1 else "标准"
                             
-                            # 2. 把库存加回去 (因为这笔买卖“作废”了)
+                            # 2. 把库存加回去
                             conn.execute(text("UPDATE products SET stock = stock + :n WHERE name = :p AND spec = :s"), 
                                          {"n": n_val, "p": p_n, "s": p_s})
                             
-                            # 3. 核心：不执行 DELETE，而是把 is_active 改为 0
+                            # 3. 核心：改为逻辑删除
                             conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), 
                                          {"id": del_id})
                             
                             conn.commit()
-                            st.success(f"✅ ID {del_id} 已成功移入回收站，库存已补回！")
+                            st.success(f"✅ ID {del_id} 已成功移入回收站")
                             st.rerun()
                         else:
-                            st.error("找不到该有效记录 ID，请核对是否已被删除。")
-
+                            st.error("找不到该有效记录 ID")
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息管理")
@@ -506,6 +504,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
