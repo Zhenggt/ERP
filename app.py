@@ -467,10 +467,14 @@ if check_password():
                 res_c_name = st.selectbox("选择要还原的客户", df_trash_c['name'].tolist())
                 if st.button("⏪ 还原该客户资料"):
                     with engine.connect() as conn:
-                        conn.execute(text("UPDATE customers SET is_active = 1 WHERE name = :n"), {"n": res_c_name})
+                        # 给订单表增加 is_active 字段 (默认值 1 代表正常数据)
+                        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1"))
+                        # 给客户表增加 is_active 字段 (默认值 1 代表正常数据)
+                        conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1"))
                         conn.commit()
                     st.success(f"✅ 客户 {res_c_name} 已重新回到档案库")
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
