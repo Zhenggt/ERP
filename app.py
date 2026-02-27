@@ -465,11 +465,88 @@ if check_password():
             st.dataframe(df_pending, width='stretch')
             # 审核逻辑可在下方继续扩展
 
-    # --- G. 财务对账 (管理员) ---
+# --- G. 财务对账 ---
     elif menu == "💰 财务对账":
-        st.header("💰 欠款对账")
-        df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
-        st.dataframe(df_unpaid, width='stretch', hide_index=True)
+        st.header("💰 欠款对账与核销")
+        
+        try:
+            # 1. 读取所有未结清账目
+            query = "SELECT id, created_at, customer, product, num, total_amount FROM orders WHERE payment_status = 'unpaid' AND (is_active != 0 OR is_active IS NULL) ORDER BY id DESC"
+            df_unpaid = pd.read_sql(query, engine)
+
+            if not df_unpaid.empty:
+                # 时间修正与汉化
+                df_unpaid['created_at'] = pd.to_datetime(df_unpaid['created_at']) + pd.Timedelta(hours=8)
+                df_unpaid['日期'] = df_unpaid['created_at'].dt.strftime('%m-%d')
+                
+                # --- A. 顶部汇总指标 ---
+                total_debt = df_unpaid['total_amount'].sum()
+                customer_count = df_unpaid['customer'].nunique()
+                
+                c1, c2 = st.columns(2)
+                c1.metric("🚩 待收/应付总欠款", f"¥ {total_debt:,.2f}")
+                c2.metric("👥 欠款单位总数", f"{customer_count} 家")
+                
+                st.divider()
+
+                # --- B. 欠款分布图 (直观看出大客户) ---
+                st.subheader("📊 欠款单位分布")
+                debt_summary = df_unpaid.groupby('customer')['total_amount'].sum().reset_index()
+                debt_summary.columns = ['客户/供应商', '欠款总额']
+                st.bar_chart(debt_summary.set_index('客户/供应商'), width='stretch')
+
+                # --- C. 交互式核销表 (使用 2026 data_editor) ---
+                st.subheader("📝 欠款明细与一键结算")
+                st.info("💡 提示：如需结算，请将“状态”双击改为“✅ 已结”，然后点击下方保存。")
+                
+                # 为编辑准备数据，增加一列状态
+                df_edit = df_unpaid[['id', '日期', 'customer', 'product', 'num', 'total_amount']].copy()
+                df_edit['状态'] = "❌ 未结" # 初始化显示名
+
+                edited_df = st.data_editor(
+                    df_edit,
+                    column_config={
+                        "id": st.column_config.NumberColumn("ID", disabled=True),
+                        "日期": st.column_config.TextColumn("日期", disabled=True),
+                        "customer": st.column_config.TextColumn("客户/供应商", disabled=True),
+                        "total_amount": st.column_config.NumberColumn("金额", format="¥%.2f", disabled=True),
+                        "状态": st.column_config.SelectboxColumn(
+                            "操作结算",
+                            options=["❌ 未结", "✅ 已结清"],
+                            required=True
+                        )
+                    },
+                    width='stretch',
+                    hide_index=True,
+                    key="debt_editor"
+                )
+
+                # --- D. 保存核销逻辑 ---
+                if st.button("💾 确认提交结算修改", type="primary", width='stretch'):
+                    # 找出被修改为“已结清”的 ID
+                    settled_ids = edited_df[edited_df['状态'] == "✅ 已结清"]['id'].tolist()
+                    
+                    if settled_ids:
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text("UPDATE orders SET payment_status = 'paid' WHERE id IN :ids"),
+                                    {"ids": tuple(settled_ids)}
+                                )
+                            st.success(f"🎉 成功核销 {len(settled_ids)} 笔账目！")
+                            import time
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"核销失败: {e}")
+                    else:
+                        st.warning("未检测到状态变更，请先修改表格中的状态。")
+
+            else:
+                st.success("🎉 目前没有任何欠款记录，账目全清！")
+
+        except Exception as e:
+            st.error(f"❌ 对账模块异常: {e}")
 
 # --- 模块 H: 经营看板 ---
     elif menu == "📈 经营看板":
@@ -642,6 +719,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
