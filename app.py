@@ -113,7 +113,7 @@ if check_password():
         st.dataframe(df, width='stretch', hide_index=True)
 
     # --- B. 采购入库 ---
-   elif menu == "📥 采购入库":
+     elif menu == "📥 采购入库":
         st.header("📥 采购入库登记")
         
         with st.form("purchase_form", clear_on_submit=True):
@@ -544,6 +544,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
