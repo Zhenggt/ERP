@@ -8,7 +8,8 @@ st.set_page_config(page_title="铝业ERP完整版 2026", layout="wide")
 
 if "user_role" not in st.session_state:
     st.session_state["user_role"] = None
-
+if "password_correct" not in st.session_state:
+    st.session_state["password_correct"] = False
 def get_beijing_time():
     return datetime.now(timezone(timedelta(hours=8)))
 
@@ -246,4 +247,5 @@ if check_password():
         st.header("💰 欠款对账")
         df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
         st.dataframe(df_unpaid, width='stretch', hide_index=True)
+
 
