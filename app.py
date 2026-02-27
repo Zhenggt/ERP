@@ -94,7 +94,7 @@ if check_password():
                 pay_s = st.radio("付款状态", ["已结清", "客户欠款"], horizontal=True)
             
             total = round(num * price, 2)
-           if st.button("确认提交并生成单据", use_container_width=True):
+            if st.button("确认提交并生成单据", use_container_width=True):
                 stock_now = float(df_p[df_p['display'] == s_o]['stock'].values[0])
                 if num > stock_now: 
                     st.error(f"库存不足！当前余量：{stock_now} kg")
@@ -246,3 +246,4 @@ if check_password():
         st.header("💰 欠款对账")
         df_unpaid = pd.read_sql("SELECT id, customer, total_amount FROM orders WHERE payment_status = 'unpaid'", engine)
         st.dataframe(df_unpaid, width='stretch', hide_index=True)
+
