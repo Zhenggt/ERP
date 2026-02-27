@@ -284,7 +284,7 @@ if check_password():
                 st.divider()
                 with st.expander("🗑️ 危险操作：删除错误记录"):
                      st.warning("点击后记录将移入回收站，库存将自动返还。")
-                    del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
+                     del_id = st.number_input("请输入要删除的记录 ID", step=1, value=0, key="del_flow_id")
         
             if st.button("确认删除并返还库存", type="primary", width='stretch'):
             if del_id > 0:
