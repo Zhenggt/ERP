@@ -18,6 +18,9 @@ engine = get_engine()
 
 # --- 2. 权限登录系统 ---
 def check_password():
+    # 1. 确保 user_role 始终存在（初始化）
+    if "user_role" not in st.session_state:
+        st.session_state["user_role"] = None
     if "password_correct" not in st.session_state:
         st.title("🚀 铝业生产管理系统")
         with st.container():
@@ -140,3 +143,4 @@ if check_password():
         df_stats = pd.read_sql("SELECT SUM(total_amount) as total FROM orders WHERE type='销售' AND created_at >= date_trunc('month', current_date)", engine)
         st.metric("本月累计销售额", f"¥ {df_stats['total'].iloc[0] or 0:,.2f}")
         # 这里可以加入 line_chart 绘制趋势图
+
