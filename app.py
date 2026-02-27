@@ -241,16 +241,12 @@ if check_password():
                 st.components.v1.html(bill_html, height=550)
                 st.cache_data.clear()
  # --- 模块 D: 历史流水 (稳定版) ---
-   # 使用 'in' 关键词匹配，只要菜单选项里包含“流水”两个字就会执行
-    elif "流水" in menu:
+  elif "流水" in menu:
         st.header("🧾 业务流水记录")
-        
-        # 调试开关：如果界面出来了但没数据，这句话会告诉你原因
-        # st.write(f"当前选中的菜单完整内容是: '{menu}'") 
 
         try:
-            # 读取所有 is_active 不为 0 的记录（兼容 NULL 和 1）
-            query = "SELECT * FROM orders WHERE is_active IS NOT 0 ORDER BY id DESC"
+            # 修正后的 SQL：查询不是 0 的记录（即 1 或 NULL）
+            query = "SELECT * FROM orders WHERE (is_active != 0 OR is_active IS NULL) ORDER BY id DESC"
             df_history = pd.read_sql(query, engine)
             
             if not df_history.empty:
@@ -260,21 +256,24 @@ if check_password():
                 
                 # 状态映射
                 status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
-                df_history['付款状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
+                # 确保字段名正确，如果不确定字段名，可以使用 get 方法
+                if 'payment_status' in df_history.columns:
+                    df_history['付款状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
                 
-                # 字段汉化（增加 ID 列显示）
+                # 字段汉化显示
                 display_cols = {
                     'id': 'ID',
                     '时间': '时间',
                     'type': '类型',
                     'customer': '客户',
                     'product': '货品',
-                    'num': '数量/重量',
-                    'total_amount': '金额',
-                    '付款状态': '状态'
+                    'num': '数量',
+                    'total_amount': '金额'
                 }
+                if '付款状态' in df_history.columns:
+                    display_cols['付款状态'] = '状态'
                 
-                # 仅显示存在的列，确保万无一失
+                # 仅显示存在的列
                 final_df = df_history.rename(columns=display_cols)
                 cols_to_show = [c for c in display_cols.values() if c in final_df.columns]
                 
@@ -283,23 +282,13 @@ if check_password():
                 st.info("💡 暂无有效的业务流水记录。")
 
         except Exception as e:
-            st.error(f"数据库读取异常: {e}")
-            # 保底显示：如果报错，尝试直接输出原始表
-            st.write("尝试显示原始数据...")
-            st.dataframe(pd.read_sql("SELECT * FROM orders LIMIT 10", engine))
-
-        # 管理员删除区
-        if role == "admin":
-            st.divider()
-            with st.expander("🗑️ 记录删除（移入回收站）"):
-                del_id = st.number_input("请输入记录 ID", step=1, value=0, key="id_to_del")
-                if st.button("确认删除", type="primary"):
-                    if del_id > 0:
-                        with engine.connect() as conn:
-                            conn.execute(text("UPDATE orders SET is_active = 0 WHERE id = :id"), {"id": del_id})
-                            conn.commit()
-                        st.success(f"ID {del_id} 已移入回收站")
-                        st.rerun()
+            st.error(f"❌ 数据库读取异常: {e}")
+            # 保底方案：如果还是报错，直接显示前10条原始数据，帮我们定位问题
+            st.write("尝试读取原始数据（前10条）进行诊断：")
+            try:
+                st.dataframe(pd.read_sql("SELECT * FROM orders LIMIT 10", engine))
+            except:
+                st.write("无法连接到数据库表。")
     # --- E. 客户档案 (带备注功能) ---
     elif menu == "👥 客户档案":
         st.header("👥 客户信息管理")
@@ -491,6 +480,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
