@@ -298,50 +298,79 @@ if check_password():
                 """
                 st.components.v1.html(bill_html, height=550)
                 st.cache_data.clear()
- # --- 模块 D: 历史流水 (2026 API 适配版) ---
+# --- 模块 D: 历史流水 ---
     elif "流水" in menu:
         st.header("🧾 业务流水记录")
 
-        # 1. 数据读取 (PostgreSQL 兼容语法)
         try:
+            # 1. 数据读取
             query = "SELECT * FROM orders WHERE (is_active != 0 OR is_active IS NULL) ORDER BY id DESC"
             df_history = pd.read_sql(query, engine)
             
             if not df_history.empty:
                 # 2. 数据格式化处理
-                df_history['created_at'] = pd.to_datetime(df_history['created_at'])
+                # 修正北京时间时差 (+8小时)
+                df_history['created_at'] = pd.to_datetime(df_history['created_at']) + pd.Timedelta(hours=8)
                 df_history['时间'] = df_history['created_at'].dt.strftime('%m-%d %H:%M')
                 
+                # 状态映射
                 status_map = {'paid': '✅ 已结', 'unpaid': '❌ 欠款', 'pending': '⏳ 待审'}
                 if 'payment_status' in df_history.columns:
-                    df_history['状态'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
+                    df_history['状态显示'] = df_history['payment_status'].map(status_map).fillna(df_history['payment_status'])
                 else:
-                    df_history['状态'] = '未知'
+                    df_history['状态显示'] = '未知'
 
+                # 定义显示的列名（将 customer 改为 客户/供应商）
                 display_cols = {
                     'id': 'ID',
                     '时间': '时间',
                     'type': '类型',
-                    'customer': '客户',
+                    'customer': '客户/供应商',
                     'product': '货品',
                     'num': '数量',
                     'total_amount': '金额',
-                    '状态': '状态'
+                    '状态显示': '状态'
                 }
                 
                 # 过滤并重命名
                 available_cols = [col for col in display_cols.keys() if col in df_history.columns]
                 show_df = df_history[available_cols].rename(columns=display_cols)
 
-                # 3. 渲染表格 - 已适配 2026 新参数 width='stretch'
+                # 3. 渲染表格
                 st.dataframe(show_df, width='stretch', hide_index=True)
+
+                # --- 🚀 核心新增：状态管理工具 ---
+                st.divider()
+                with st.expander("📝 状态快速修改"):
+                    st.write("请根据上方表格显示的 **ID** 进行修改")
+                    c1, c2, c3 = st.columns([1, 1, 1])
+                    
+                    with c1:
+                        edit_id = st.number_input("记录 ID", step=1, value=0, key="edit_flow_id")
+                    with c2:
+                        target_text = st.selectbox("修改状态为", ["✅ 已结", "❌ 欠款", "⏳ 待审"])
+                        # 转换回数据库字段
+                        rev_map = {"✅ 已结": "paid", "❌ 欠款": "unpaid", "⏳ 待审": "pending"}
+                    with c3:
+                        st.write("##") # 补齐高度对齐按钮
+                        if st.button("更新状态", type="primary", width='stretch'):
+                            if edit_id > 0:
+                                with engine.begin() as conn:
+                                    conn.execute(
+                                        text("UPDATE orders SET payment_status = :s WHERE id = :id"),
+                                        {"s": rev_map[target_text], "id": edit_id}
+                                    )
+                                st.success(f"✅ ID {edit_id} 已标记为 {target_text}")
+                                import time
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.warning("请输入有效的记录 ID")
             else:
                 st.info("💡 暂无有效的业务流水记录。")
 
         except Exception as e:
             st.error(f"❌ 数据库读取异常: {e}")
-            st.write("数据保底显示：")
-            st.dataframe(pd.read_sql("SELECT * FROM orders LIMIT 5", engine), width='stretch')
 
         # 4. 管理员功能区
         if role == "admin":
@@ -574,6 +603,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
