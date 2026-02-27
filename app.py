@@ -112,51 +112,68 @@ if check_password():
         df = pd.read_sql('SELECT name as 品名, spec as 规格, stock as "库存(kg)" FROM products WHERE stock > 0', engine)
         st.dataframe(df, width='stretch', hide_index=True)
 
-    # --- B. 采购入库 ---
-     elif menu == "📥 采购入库":
+   # --- 模块 B: 采购入库 ---
+    elif menu == "📥 采购入库":
         st.header("📥 采购入库登记")
         
+        # 使用 form 组件让界面更具区块感
         with st.form("purchase_form", clear_on_submit=True):
-            # 1. 新增供应商输入框
-            # 使用 st.text_input 或者 st.selectbox（如果你有供应商名单的话）
+            st.subheader("填写单据信息")
+            
+            # 第一行：供应商信息（增加空格感）
             supplier = st.text_input("🚚 供应商名称", placeholder="请输入厂家或供应商全称")
             
-            c1, c2 = st.columns(2)
-            with c1:
-                p_name = st.selectbox("货品名称", ["螺纹钢", "盘螺", "线材"]) # 示例数据
-                p_spec = st.text_input("规格型号", value="标准")
-            with c2:
-                in_num = st.number_input("入库重量 (吨)", min_value=0.0, step=0.01)
-                in_price = st.number_input("进货单价 (元/吨)", min_value=0.0, step=0.1)
+            st.divider() # 细分割线
+            
+            # 第二行：货品基本信息
+            col_p, col_s = st.columns(2)
+            with col_p:
+                p_name = st.selectbox("货品名称", ["螺纹钢", "盘螺", "线材", "其他"])
+            with col_s:
+                p_spec = st.text_input("规格型号", value="标准", help="例如：Φ12, Φ18等")
+            
+            # 第三行：数量与价格
+            col_n, col_pr = st.columns(2)
+            with col_n:
+                in_num = st.number_input("入库重量 (吨)", min_value=0.0, step=0.01, format="%.2f")
+            with col_pr:
+                in_price = st.number_input("进货单价 (元/吨)", min_value=0.0, step=0.01, format="%.2f")
 
-            submit = st.form_submit_button("确认入库", width='stretch')
+            # 提交按钮
+            submit_btn = st.form_submit_button("确认提交入库", type="primary", width='stretch')
 
-            if submit:
+            if submit_btn:
+                # 简单校验
                 if not supplier:
-                    st.error("❌ 请填写供应商名称！")
+                    st.error("⚠️ 请输入供应商名称！")
                 elif in_num <= 0:
-                    st.error("❌ 入库重量必须大于 0！")
+                    st.error("⚠️ 入库重量必须大于 0！")
                 else:
-                    with engine.connect() as conn:
-                        # A. 更新库存
-                        conn.execute(text("""
-                            UPDATE products SET stock = stock + :n 
-                            WHERE name = :p AND spec = :s
-                        """), {"n": in_num, "p": p_name, "s": p_spec})
-                        
-                        # B. 记录到流水 (将供应商存入 customer 字段)
-                        conn.execute(text("""
-                            INSERT INTO orders (type, customer, product, num, total_amount, is_active)
-                            VALUES ('采购入库', :supplier, :product, :num, :amount, 1)
-                        """), {
-                            "supplier": supplier,
-                            "product": f"{p_name} | {p_spec}",
-                            "num": in_num,
-                            "amount": in_num * in_price
-                        })
-                        conn.commit()
-                        st.success(f"✅ 已成功入库：{p_name} ({in_num}吨)，供应商：{supplier}")
-
+                    try:
+                        with engine.connect() as conn:
+                            # 1. 更新库存 (注意：入库是增加 stock)
+                            conn.execute(text("""
+                                UPDATE products 
+                                SET stock = stock + :n 
+                                WHERE name = :p AND spec = :s
+                            """), {"n": in_num, "p": p_name, "s": p_spec})
+                            
+                            # 2. 写入订单表 (供应商存入 customer 字段)
+                            conn.execute(text("""
+                                INSERT INTO orders (type, customer, product, num, total_amount, payment_status, is_active)
+                                VALUES ('采购入库', :supplier, :product, :num, :amount, 'paid', 1)
+                            """), {
+                                "supplier": supplier,
+                                "product": f"{p_name} | {p_spec}",
+                                "num": in_num,
+                                "amount": in_num * in_price
+                            })
+                            conn.commit()
+                            
+                            st.success(f"✅ 入库成功！\n供应商：{supplier} | 货品：{p_name} | 增加库存：{in_num} 吨")
+                            # st.balloons() # 可选：增加一个小庆祝效果
+                    except Exception as e:
+                        st.error(f"❌ 入库失败，请联系管理员。错误信息: {e}")
     # --- C. 销售出库 ---
     elif menu == "📤 销售出库":
         st.header("📤 销售出库")
@@ -544,6 +561,7 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
 
 
 
