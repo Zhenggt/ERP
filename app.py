@@ -56,17 +56,44 @@ def check_password():
 if check_password():
     role = st.session_state["user_role"]
     
-    # 动态菜单：管理员看到全部，员工仅限前三项
-    all_menus = ["📊 库存看板", "📥 采购入库", "📤 销售出库", "🧾 历史流水", "👥 客户档案", "🔔 订单审核", "💰 财务对账", "📈 经营看板"]
+    # 1. 定义全部菜单，在末尾加入回收站
+    all_menus = [
+        "📊 库存看板", 
+        "📥 采购入库", 
+        "📤 销售出库", 
+        "🧾 历史流水", 
+        "👥 客户档案", 
+        "🔔 订单审核", 
+        "💰 财务对账", 
+        "📈 经营看板",
+        "♻️ 回收站"  # 新增
+    ]
+    
+    # 2. 动态过滤：员工只看前三项，管理员看全部
     display_menu = all_menus[:3] if role == "staff" else all_menus
     
     st.sidebar.title(f"👤 {'管理员' if role == 'admin' else '员工'}")
+    
+    # 3. 渲染菜单
     menu = st.sidebar.radio("功能导航", display_menu)
     
+    # 退出登录逻辑
     if st.sidebar.button("安全退出", width='stretch'):
         del st.session_state["password_correct"]
         st.session_state["user_role"] = None
         st.rerun()
+
+    # --- 下面开始进入各个功能的具体代码 ---
+    if menu == "📊 库存看板":
+        pass # 原有代码...
+    
+    # ... 中间其他功能代码 ...
+    
+    # --- 最后加入回收站的入口 ---
+    elif menu == "♻️ 回收站":
+        # 这里放我之前发给你的“模块 G: 回收站”的完整代码
+        st.header("♻️ 数据回收站")
+        # (此处省略具体逻辑，请确保下面接上之前修复好的 G 模块代码)
 
     # --- A. 库存看板 ---
     if menu == "📊 库存看板":
@@ -446,3 +473,4 @@ if check_password():
                     st.rerun()
             else:
                 st.write("客户回收站没有记录。")
+
