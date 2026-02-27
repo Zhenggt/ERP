@@ -85,11 +85,12 @@ if check_password():
                     st.success("入库成功！")
                     st.cache_data.clear()
 
-    # --- C. 销售出库 (全员可见，带打印) ---
+# --- C. 销售出库 (修正缩进与参数版) ---
     elif menu == "📤 销售出库":
         st.header("📤 销售出库单")
         df_p = pd.read_sql("SELECT name, spec, stock FROM products WHERE stock > 0", engine)
         df_c = pd.read_sql("SELECT name, phone, address FROM customers", engine)
+        
         if not df_p.empty:
             df_p['display'] = df_p['name'] + " | " + df_p['spec'].fillna("标准")
             col1, col2 = st.columns(2)
@@ -104,29 +105,32 @@ if check_password():
             total = round(num * price, 2)
             st.info(f"合计金额：¥ {total:,.2f}")
             
-            if st.button("确认提交并生成单据", use_container_width=True):
+            # 使用最新的 width='stretch' 参数替代 use_container_width
+            if st.button("确认提交并生成单据", width='stretch'):
+                # 检查库存
                 stock_now = float(df_p[df_p['display'] == s_o]['stock'].values[0])
                 if num > stock_now: 
                     st.error(f"库存不足！当前余量：{stock_now} kg")
                 elif num <= 0: 
                     st.error("请输入有效重量")
                 else:
-                    p_n = s_o.split(" | ")[0]
-                    p_s = s_o.split(" | ")[1]
+                    p_n, p_s = s_o.split(" | ")[0], s_o.split(" | ")[1]
                     p_status = 'paid' if pay_s == "已结清" else 'unpaid'
                     
-                    # 1. 数据库操作
                     with engine.connect() as conn:
+                        # 更新库存
                         conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), 
                                      {"n": num, "p": p_n, "s": p_s})
+                        # 插入订单
                         conn.execute(text("""
                             INSERT INTO orders (type, customer, product, num, price, total_amount, payment_status) 
                             VALUES ('销售', :c, :p, :n, :pr, :t, :ps)
                         """), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total, "ps": p_status})
                         conn.commit()
                     
-                    st.success("✅ 出库成功！单据生成如下：")
+                    st.success("✅ 出库成功！")
                     st.cache_data.clear()
+                    # 此处可继续添加之前的高质量三联单 HTML 代码
 
                     # --- 2. 恢复原来那个高质量三联单 HTML 模板 ---
                     c_info = {"phone": "未登记", "address": "无地址"}
@@ -237,6 +241,7 @@ if check_password():
         df_stats = pd.read_sql("SELECT SUM(total_amount) as total FROM orders WHERE type='销售' AND created_at >= date_trunc('month', current_date)", engine)
         st.metric("本月累计销售额", f"¥ {df_stats['total'].iloc[0] or 0:,.2f}")
         # 这里可以加入 line_chart 绘制趋势图
+
 
 
 
