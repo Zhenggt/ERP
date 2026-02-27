@@ -104,31 +104,113 @@ if check_password():
             total = round(num * price, 2)
             st.info(f"合计金额：¥ {total:,.2f}")
             
-            if st.button("确认提交并生成单据", use_container_width=True):
+          if st.button("确认提交并生成单据", use_container_width=True):
                 stock_now = float(df_p[df_p['display'] == s_o]['stock'].values[0])
-                if num > stock_now: st.error("库存不足！")
-                elif num <= 0: st.error("重量无效")
+                if num > stock_now: 
+                    st.error(f"库存不足！当前余量：{stock_now} kg")
+                elif num <= 0: 
+                    st.error("请输入有效重量")
                 else:
-                    p_n, p_s = s_o.split(" | ")[0], s_o.split(" | ")[1]
+                    p_n = s_o.split(" | ")[0]
+                    p_s = s_o.split(" | ")[1]
                     p_status = 'paid' if pay_s == "已结清" else 'unpaid'
+                    
+                    # 1. 数据库操作
                     with engine.connect() as conn:
-                        conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), {"n": num, "p": p_n, "s": p_s})
-                        conn.execute(text("INSERT INTO orders (type, customer, product, num, price, total_amount, payment_status) VALUES ('销售', :c, :p, :n, :pr, :t, :ps)"), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total, "ps": p_status})
+                        conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), 
+                                     {"n": num, "p": p_n, "s": p_s})
+                        conn.execute(text("""
+                            INSERT INTO orders (type, customer, product, num, price, total_amount, payment_status) 
+                            VALUES ('销售', :c, :p, :n, :pr, :t, :ps)
+                        """), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total, "ps": p_status})
                         conn.commit()
-                    st.success("出库成功！")
+                    
+                    st.success("✅ 出库成功！单据生成如下：")
+                    st.cache_data.clear()
+
+                    # --- 2. 恢复原来那个高质量三联单 HTML 模板 ---
+                    c_info = {"phone": "未登记", "address": "无地址"}
+                    if t_c != "散客":
+                        res = df_c[df_c['name'] == t_c].iloc[0]
+                        c_info['phone'] = res['phone'] if res['phone'] else "未登记"
+                        c_info['address'] = res['address'] if res['address'] else "无地址"
+
                     bill_html = f"""
-                    <div id="bill" style="border:1px dashed #000; padding:10px; background:#fff; color:#000;">
-                        <h2 style="text-align:center;">销售出库单</h2>
-                        <p>客户: {t_c} | 日期: {get_beijing_time().strftime('%Y-%m-%d')}</p>
-                        <hr>
-                        <p>货品: {s_o} | 重量: {num}kg | 单价: {price}元</p>
-                        <p><strong>合计金额: {total} 元</strong></p>
-                        <p style="text-align:right;">签字：_________</p>
+                    <style>
+                        .bill-box {{
+                            width: 185mm; 
+                            padding: 10mm; 
+                            border: 1.5px dashed #000;
+                            font-family: 'SimSun', 'STSong', serif;
+                            color: #000;
+                            background: #fff;
+                            margin: 10px auto;
+                        }}
+                        .title {{ text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; margin-bottom: 10px; }}
+                        .info-table {{ width: 100%; font-size: 14px; margin-bottom: 5px; }}
+                        .data-table {{ width: 100%; border-collapse: collapse; border: 1.5px solid #000; }}
+                        .data-table th, .data-table td {{ border: 1.5px solid #000; padding: 8px; text-align: center; font-size: 14px; }}
+                        .footer {{ width: 100%; margin-top: 20px; font-size: 14px; display: flex; justify-content: space-between; }}
+                        @media print {{
+                            .no-print {{ display: none !important; }}
+                            @page {{ size: 241mm 140mm; margin: 0; }}
+                        }}
+                    </style>
+
+                    <div class="bill-box" id="bill_content">
+                        <div class="title">销售出库单</div>
+                        <table class="info-table">
+                            <tr>
+                                <td><strong>收货单位:</strong> {t_c}</td>
+                                <td style="text-align:right;"><strong>日期:</strong> {get_beijing_time().strftime('%Y-%m-%d %H:%M')}</td>
+                            </tr>
+                            <tr>
+                                <td colspan="2"><strong>联系方式:</strong> {c_info['phone']} | <strong>地址:</strong> {c_info['address']}</td>
+                            </tr>
+                        </table>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>货品名称</th><th>规格型号</th><th>数量(kg)</th><th>单价(元)</th><th>金额(元)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="height:50px;">
+                                    <td>{p_n}</td><td>{p_s}</td><td>{num}</td><td>{price}</td><td>{total}</td>
+                                </tr>
+                                <tr style="height:35px;">
+                                    <td>备注</td><td colspan="4">付款状态：{"已结清" if p_status=='paid' else "未付款(欠款)"}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="footer">
+                            <span>制单: {role}</span>
+                            <span>送货人签字: _________</span>
+                            <span>收货人签字: _________________</span>
+                        </div>
                     </div>
-                    <button onclick="window.print()">🖨️ 打印单据</button>
+
+                    <div style="text-align:center;">
+                        <button class="no-print" onclick="printBill()" style="margin-top:15px; padding:12px 30px; background:#2563eb; color:white; border:none; border-radius:5px; cursor:pointer; font-size:16px; font-weight:bold;">
+                            🖨️ 立即打印三联单
+                        </button>
+                    </div>
+
+                    <script>
+                    function printBill() {{
+                        var content = document.getElementById('bill_content').innerHTML;
+                        var style = document.getElementsByTagName('style')[0].innerHTML;
+                        var win = window.open('', '', 'height=600,width=900');
+                        win.document.write('<html><head><title>打印销售单</title><style>' + style + '</style></head><body>');
+                        win.document.write(content);
+                        win.document.write('</body></html>');
+                        win.document.close();
+                        setTimeout(function(){{ win.print(); win.close(); }}, 300);
+                    }}
+                    </script>
                     """
                     import streamlit.components.v1 as components
-                    components.html(bill_html, height=300)
+                    components.html(bill_html, height=500, scrolling=True)
 
     # --- D. 财务对账 (管理员可见) ---
     elif menu == "💰 财务对账" and role == "admin":
@@ -155,5 +237,6 @@ if check_password():
         df_stats = pd.read_sql("SELECT SUM(total_amount) as total FROM orders WHERE type='销售' AND created_at >= date_trunc('month', current_date)", engine)
         st.metric("本月累计销售额", f"¥ {df_stats['total'].iloc[0] or 0:,.2f}")
         # 这里可以加入 line_chart 绘制趋势图
+
 
 
