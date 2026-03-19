@@ -4,49 +4,34 @@ from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta, timezone
 import requests
 from bs4 import BeautifulSoup
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60) # 财经数据建议 1 分钟更新一次
 def get_aluminum_price():
-    # 目标：南海铝锭价格页面
-    url = "https://www.lvdingjia.com/" 
+    # 目标：新浪财经沪铝主力合约 (AL0)
+    # 这个接口返回的是纯文本，速度极快
+    url = "https://hq.sinajs.cn/list=nf_AL0" 
     headers = {
-        # 模拟真实的浏览器，防止被服务器拒绝
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.lvdingjia.com/'
+        'Referer': 'http://finance.sina.com.cn',
+        'User-Agent': 'Mozilla/5.0'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'utf-8' # 强制转码，防止中文乱码
-        soup = BeautifulSoup(response.text, 'html.parser')
+        response = requests.get(url, headers=headers, timeout=5)
+        # 解析新浪的数据格式：var hq_str_nf_AL0="沪铝2605,10:48:34,19560.00,19580.00,19510.00,..."
+        data_str = response.text.split('"')[1]
+        data_list = data_str.split(',')
         
-        # --- 针对 lvdingjia.com 的精准定位 ---
-        # 查找包含“南海灵通”或“南海有色”的表格行
-        # 该网站通常将价格放在特定的 table 或 div 中
-        items = soup.find_all('tr') # 尝试抓取所有行
+        # 索引 2 是当前价格，索引 3 是昨日收盘价（用于计算涨跌）
+        current_price = float(data_list[2])
+        last_close = float(data_list[3])
+        change_val = current_price - last_close
         
-        price = "暂无"
-        change = "0"
-
-        for item in items:
-            text_content = item.get_text()
-            if "南海灵通" in text_content and "铝" in text_content:
-                # 提取该行中的数字。通常价格在第 2 或第 3 个 td 标签
-                tds = item.find_all('td')
-                if len(tds) >= 3:
-                    price = tds[2].get_text().strip() # 均价通常在第三列
-                    change = tds[4].get_text().strip() # 涨跌通常在第五列
-                break
-        
-        # 如果还是没找到，尝试另一种常见的 class 定位
-        if price == "暂无":
-            # 某些页面版本价格可能在特定的 class 里
-            price_tag = soup.select_one('.price-num') 
-            if price_tag:
-                price = price_tag.text.strip()
-
-        return {"price": price, "change": change, "status": "success"}
+        return {
+            "price": f"{current_price:.0f}", 
+            "change": f"{change_val:+.0f}", 
+            "status": "success"
+        }
     except Exception as e:
-        return {"price": "获取失败", "change": "0", "status": "error"}
+        return {"price": "接口维护", "change": "0", "status": "error"}
 
 # --- 2. 基础配置 ---
 st.set_page_config(page_title="铝业ERP系统", layout="wide")
