@@ -145,7 +145,7 @@ if check_password():
         value=f"¥ {market_data['price']}", 
         delta=market_data['change']
         )
-        st.sidebar.caption(f"更新时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        st.sidebar.caption(f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
   # --- 模块 B: 采购入库 (优化排版版) ---
     # --- 模块 B: 采购入库 ---
