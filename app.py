@@ -137,15 +137,23 @@ if check_password():
          # 获取数据
         market_data = get_aluminum_price()
 
-        # 使用 Streamlit 漂亮的指标组件显示
         st.sidebar.markdown("---")
         st.sidebar.subheader("📈 今日市场行情")
+        
+        # 显示铝锭价格
         st.sidebar.metric(
-        label="南海铝锭现货均价", 
-        value=f"¥ {market_data['price']}", 
-        delta=market_data['change']
+            label="南海铝锭现货均价", 
+            value=f"¥ {market_data['price']}", 
+            delta=market_data['change']
         )
-        st.sidebar.caption(f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+        # 核心修改：强制使用北京/新加坡时间 (UTC+8)
+        # 注意：这里需要你确认顶部有 from datetime import datetime, timedelta, timezone
+        SHA_TZ = timezone(timedelta(hours=8))
+        beijing_now = datetime.now(SHA_TZ)
+        
+        st.sidebar.caption(f"📍 节点: 北京/新加坡时间")
+        st.sidebar.caption(f"⏰ 更新: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
 
   # --- 模块 B: 采购入库 (优化排版版) ---
     # --- 模块 B: 采购入库 ---
