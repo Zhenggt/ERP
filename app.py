@@ -4,7 +4,34 @@ from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta, timezone
 import requests
 from bs4 import BeautifulSoup
-
+@st.cache_data(ttl=60) # 财经数据建议 1 分钟更新一次
+def get_aluminum_price():
+    # 目标：新浪财经沪铝主力合约 (AL0)
+    # 这个接口返回的是纯文本，速度极快
+    url = "https://hq.sinajs.cn/list=nf_AL0" 
+    headers = {
+        'Referer': 'http://finance.sina.com.cn',
+        'User-Agent': 'Mozilla/5.0'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        # 解析新浪的数据格式：var hq_str_nf_AL0="沪铝2605,10:48:34,19560.00,19580.00,19510.00,..."
+        data_str = response.text.split('"')[1]
+        data_list = data_str.split(',')
+        
+        # 索引 2 是当前价格，索引 3 是昨日收盘价（用于计算涨跌）
+        current_price = float(data_list[2])
+        last_close = float(data_list[3])
+        change_val = current_price - last_close
+        
+        return {
+            "price": f"{current_price:.0f}", 
+            "change": f"{change_val:+.0f}", 
+            "status": "success"
+        }
+    except Exception as e:
+        return {"price": "接口维护", "change": "0", "status": "error"}
 # --- 2. 基础配置 ---
 st.set_page_config(page_title="铝业ERP系统", layout="wide")
 
@@ -42,11 +69,17 @@ if engine:
             st.warning(f"数据库结构自动检查中... (若已手动升级请忽略: {e})")
 # --- 3. 权限登录 (增加安全检查) ---
 def check_password():
+    # --- 核心修复：如果笔记本里没这个词，先给它写上 False ---
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
+    # ----------------------------------------------------
+
     if not st.session_state["password_correct"]:
         st.title("🔒 铝业生产管理系统")
         u = st.text_input("账号")
         p = st.text_input("密码", type="password")
-        if st.button("登录系统", width='stretch'):
+        
+        if st.button("登录系统", use_container_width=True): # 注意：Streamlit 最新版用 use_container_width 代替 width='stretch'
             try:
                 # 检查 Secrets 中是否存在 auth 部分
                 auth = st.secrets["auth"]
@@ -63,6 +96,7 @@ def check_password():
             except KeyError:
                 st.error("❌ 权限配置缺失：请在 Secrets 中添加 [auth] 相关项")
         return False
+    
     return True
 # --- 3. 业务核心逻辑 ---
 if check_password():
