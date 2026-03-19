@@ -2,8 +2,31 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta, timezone
-#test
+import requests
+from bs4 import BeautifulSoup
 # --- 1. 初始化 Session State (必须放在最前面) ---
+@st.cache_data(ttl=3600)  # 每小时缓存一次，避免频繁请求被封 IP
+def get_aluminum_price():
+    # 示例 URL：请替换为你找到的提供南海铝价格的免费页面
+    url = "https://www.youse.com/price/nanhaialuminum" 
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # --- 这里的解析规则需要根据你选中的网页微调 ---
+        # 假设价格在 <span> 标签且类名为 'price-value'
+        price = soup.find('span', class_='price-value').text.strip()
+        # 假设涨跌在 <span> 标签且类名为 'price-change'
+        change = soup.find('span', class_='price-change').text.strip()
+        
+        return {"price": price, "change": change, "status": "success"}
+    except Exception as e:
+        # 如果抓取失败，返回默认值，确保看板不崩溃
+        return {"price": "暂无数据", "change": "0", "status": "error"}
 if "password_correct" not in st.session_state:
     st.session_state["password_correct"] = False
 if "user_role" not in st.session_state:
@@ -111,6 +134,18 @@ if check_password():
         st.header("📊 当前库存")
         df = pd.read_sql('SELECT name as 品名, spec as 规格, stock as "库存(kg)" FROM products WHERE stock > 0', engine)
         st.dataframe(df, width='stretch', hide_index=True)
+         # 获取数据
+        market_data = get_aluminum_price()
+
+        # 使用 Streamlit 漂亮的指标组件显示
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📈 今日市场行情")
+        st.sidebar.metric(
+        label="南海铝锭现货均价", 
+        value=f"¥ {market_data['price']}", 
+        delta=market_data['change']
+        )
+        st.sidebar.caption(f"更新时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
   # --- 模块 B: 采购入库 (优化排版版) ---
     # --- 模块 B: 采购入库 ---
