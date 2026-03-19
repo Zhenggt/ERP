@@ -4,33 +4,49 @@ from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta, timezone
 import requests
 from bs4 import BeautifulSoup
-# --- 1. 初始化 Session State (必须放在最前面) ---
-@st.cache_data(ttl=3600)  # 每小时缓存一次，避免频繁请求被封 IP
+@st.cache_data(ttl=3600)
 def get_aluminum_price():
-    # 示例 URL：请替换为你找到的提供南海铝价格的免费页面
-    url = "https://www.youse.com/price/nanhaialuminum" 
+    # 目标：南海铝锭价格页面
+    url = "https://www.lvdingjia.com/" 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        # 模拟真实的浏览器，防止被服务器拒绝
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.lvdingjia.com/'
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, headers=headers, timeout=10)
+        response.encoding = 'utf-8' # 强制转码，防止中文乱码
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # --- 这里的解析规则需要根据你选中的网页微调 ---
-        # 假设价格在 <span> 标签且类名为 'price-value'
-        price = soup.find('span', class_='price-value').text.strip()
-        # 假设涨跌在 <span> 标签且类名为 'price-change'
-        change = soup.find('span', class_='price-change').text.strip()
+        # --- 针对 lvdingjia.com 的精准定位 ---
+        # 查找包含“南海灵通”或“南海有色”的表格行
+        # 该网站通常将价格放在特定的 table 或 div 中
+        items = soup.find_all('tr') # 尝试抓取所有行
         
+        price = "暂无"
+        change = "0"
+
+        for item in items:
+            text_content = item.get_text()
+            if "南海灵通" in text_content and "铝" in text_content:
+                # 提取该行中的数字。通常价格在第 2 或第 3 个 td 标签
+                tds = item.find_all('td')
+                if len(tds) >= 3:
+                    price = tds[2].get_text().strip() # 均价通常在第三列
+                    change = tds[4].get_text().strip() # 涨跌通常在第五列
+                break
+        
+        # 如果还是没找到，尝试另一种常见的 class 定位
+        if price == "暂无":
+            # 某些页面版本价格可能在特定的 class 里
+            price_tag = soup.select_one('.price-num') 
+            if price_tag:
+                price = price_tag.text.strip()
+
         return {"price": price, "change": change, "status": "success"}
     except Exception as e:
-        # 如果抓取失败，返回默认值，确保看板不崩溃
-        return {"price": "暂无数据", "change": "0", "status": "error"}
-if "password_correct" not in st.session_state:
-    st.session_state["password_correct"] = False
-if "user_role" not in st.session_state:
-    st.session_state["user_role"] = None
+        return {"price": "获取失败", "change": "0", "status": "error"}
 
 # --- 2. 基础配置 ---
 st.set_page_config(page_title="铝业ERP系统", layout="wide")
