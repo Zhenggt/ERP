@@ -5,34 +5,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.engine import URL
 import requests
 from bs4 import BeautifulSoup
-@st.cache_data(ttl=60) # 财经数据建议 1 分钟更新一次
-def get_aluminum_price():
-    # 目标：新浪财经沪铝主力合约 (AL0)
-    # 这个接口返回的是纯文本，速度极快
-    url = "https://hq.sinajs.cn/list=nf_AL0" 
-    headers = {
-        'Referer': 'http://finance.sina.com.cn',
-        'User-Agent': 'Mozilla/5.0'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        # 解析新浪的数据格式：var hq_str_nf_AL0="沪铝2605,10:48:34,19560.00,19580.00,19510.00,..."
-        data_str = response.text.split('"')[1]
-        data_list = data_str.split(',')
-        
-        # 索引 2 是当前价格，索引 3 是昨日收盘价（用于计算涨跌）
-        current_price = float(data_list[2])
-        last_close = float(data_list[3])
-        change_val = current_price - last_close
-        
-        return {
-            "price": f"{current_price:.0f}", 
-            "change": f"{change_val:+.0f}", 
-            "status": "success"
-        }
-    except Exception as e:
-        return {"price": "接口维护", "change": "0", "status": "error"}
 # --- 2. 基础配置 ---
 st.set_page_config(page_title="策启金属ERP系统", layout="wide")
 
@@ -158,26 +130,8 @@ if check_password():
         st.header("📊 当前库存")
         df = pd.read_sql('SELECT name as 品名, spec as 规格, stock as "库存(kg)" FROM products WHERE stock > 0', engine)
         st.dataframe(df, width='stretch', hide_index=True)
-         # 获取数据
-        market_data = get_aluminum_price()
-
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("📈 今日市场行情")
-        
-        # 显示铝锭价格
-        st.sidebar.metric(
-            label="南海铝锭现货均价", 
-            value=f"¥ {market_data['price']}", 
-            delta=market_data['change']
-        )
-
-        # 核心修改：强制使用北京/新加坡时间 (UTC+8)
-        # 注意：这里需要你确认顶部有 from datetime import datetime, timedelta, timezone
-        SHA_TZ = timezone(timedelta(hours=8))
-        beijing_now = datetime.now(SHA_TZ)
-        
-        st.sidebar.caption(f"📍 节点: 北京/新加坡时间")
-        st.sidebar.caption(f"⏰ 更新: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
+       
+       
 
   # --- 模块 B: 采购入库 (多行动态版) ---
     elif menu == "📥 采购入库":
