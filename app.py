@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
 from datetime import datetime, timedelta, timezone
+from sqlalchemy.engine import URL
 import requests
 from bs4 import BeautifulSoup
 @st.cache_data(ttl=60) # 财经数据建议 1 分钟更新一次
@@ -42,31 +43,47 @@ def get_beijing_time():
 @st.cache_resource
 def get_engine():
     try:
-        # 确保能读取到 db_uri
-        db_url = st.secrets["db_uri"]
-        return create_engine(db_url, pool_pre_ping=True)
+        # 1. 读取原始连接串
+        raw_url = st.secrets["db_uri"]
+        
+        # 2. 【关键修复】剥离导致报错的额外参数 (如 supavisor_session_id)
+        # 如果包含问号，只取问号之前的部分
+        clean_url = raw_url.split("?")[0] if "?" in raw_url else raw_url
+        
+        # 3. 创建引擎，手动补回必要的 sslmode 参数
+        return create_engine(
+            clean_url, 
+            connect_args={"sslmode": "require"},
+            pool_pre_ping=True,
+            pool_recycle=300
+        )
     except Exception as e:
-        st.error("❌ 数据库配置读取失败，请检查 Secrets 中的 db_uri")
+        # 这里的报错会更详细，方便调试
+        st.error(f"❌ 数据库初始化失败: {e}")
         return None
 
+# --- 执行数据库初始化 ---
 engine = get_engine()
-with engine.connect() as conn:
-    conn.execute(text("UPDATE orders SET is_active = 1 WHERE is_active IS NULL"))
-    conn.commit()
+
+# 增加安全检查：只有 engine 成功创建才执行后续操作
 if engine:
-    with engine.connect() as conn:
-        try:
-            # 1. 给 orders 表增加 is_active 字段 (1为正常, 0为回收站)
+    try:
+        with engine.connect() as conn:
+            # 1. 结构检查与升级
             conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1"))
-            
-            # 2. 给 customers 表增加 is_active 字段
             conn.execute(text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 1"))
             
-            # 提交更改
+            # 2. 修复旧数据
+            conn.execute(text("UPDATE orders SET is_active = 1 WHERE is_active IS NULL"))
+            
+            # 3. 提交更改
             conn.commit()
-        except Exception as e:
-            # 如果报错可能是因为权限问题，或者字段已存在但数据库不支持 IF NOT EXISTS
-            st.warning(f"数据库结构自动检查中... (若已手动升级请忽略: {e})")
+    except Exception as e:
+        # 捕获表结构修改时的警告（部分数据库不支持 IF NOT EXISTS）
+        st.info(f"💡 数据库结构检查提示: {e}")
+else:
+    st.warning("⚠️ 数据库连接未就绪，请检查 Secrets 配置。")
+    st.stop() # 停止运行，防止后续代码崩溃
 # --- 3. 权限登录 (增加安全检查) ---
 def check_password():
     # --- 核心修复：如果笔记本里没这个词，先给它写上 False ---
@@ -75,7 +92,7 @@ def check_password():
     # ----------------------------------------------------
 
     if not st.session_state["password_correct"]:
-        st.title("🔒 铝业生产管理系统")
+        st.title("🔒 策启金属ERP系统")
         u = st.text_input("账号")
         p = st.text_input("密码", type="password")
         
