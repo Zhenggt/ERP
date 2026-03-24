@@ -162,81 +162,91 @@ if check_password():
         st.sidebar.caption(f"📍 节点: 北京/新加坡时间")
         st.sidebar.caption(f"⏰ 更新: {beijing_now.strftime('%Y-%m-%d %H:%M:%S')}")
 
-  # --- 模块 B: 采购入库 (优化排版版) ---
-    # --- 模块 B: 采购入库 ---
+  # --- 模块 B: 采购入库 (多行动态版) ---
     elif menu == "📥 采购入库":
         st.header("📥 采购入库登记")
         
-        # 1. 输入表单区块
-        with st.form("purchase_form_clean", clear_on_submit=True):
-            # 供应商信息
-            supplier = st.text_input("🚚 供应商名称", placeholder="填写厂家或发货方全称")
-            
-            st.write("") # 增加微量间距
-            
-            # 货品信息并行排列
-            col_p, col_s = st.columns(2)
-            with col_p:
-                p_name = st.text_input("货品名称", placeholder="如：铝板")
-            with col_s:
-                p_spec = st.text_input("规格型号", placeholder="如：6061 / 标准")
-            
-            # 数量金额并行排列
-            col_n, col_pr = st.columns(2)
-            with col_n:
-                in_num = st.number_input("入库重量 (公斤)", min_value=0.0, step=0.01, format="%.2f")
-            with col_pr:
-                in_price = st.number_input("进货单价 (元/公斤)", min_value=0.0, step=0.01, format="%.2f")
+        # 1. 基础信息
+        with st.container(border=True):
+            col_sup, col_date = st.columns([2, 1])
+            with col_sup:
+                supplier = st.text_input("🚚 供应商名称", placeholder="填写厂家或发货方全称")
+            with col_date:
+                in_date = st.date_input("入库日期")
 
-            # 提交按钮（适配 2026 最新 width 规范）
-            submit_btn = st.form_submit_button("确认提交入库", type="primary", width='stretch')
+        st.write("📦 **入库明细** (点击下方 `+` 添加多种货品)")
 
-            # 2. 提交处理逻辑
-            if submit_btn:
-                if not supplier or not p_name:
-                    st.error("⚠️ 错误：供应商和货品名称不能为空！")
-                elif in_num <= 0:
-                    st.error("⚠️ 错误：入库数量必须大于 0！")
-                else:
-                    try:
-                        # 使用 begin() 开启事务：确保库存更新与流水写入【同时成功】
-                        with engine.begin() as conn:
-                            # A. 自动创建货品（若不存在）
+        # 2. 核心：多行编辑器
+        # 预设一行空的
+        init_purchase = pd.DataFrame([
+            {"货品名称": "铝锭", "规格型号": "标准", "重量(kg)": 0.0, "进货单价": 0.0}
+        ])
+
+        edited_purchase = st.data_editor(
+            init_purchase,
+            num_rows="dynamic",
+            column_config={
+                "货品名称": st.column_config.TextColumn("货品名称", required=True),
+                "规格型号": st.column_config.TextColumn("规格型号"),
+                "重量(kg)": st.column_config.NumberColumn("重量", min_value=0.0, format="%.2f"),
+                "进货单价": st.column_config.NumberColumn("单价", min_value=0.0, format="%.2f"),
+            },
+            use_container_width=True,
+            key="purchase_editor"
+        )
+
+        # 计算总计
+        total_in_weight = edited_purchase["重量(kg)"].sum()
+        total_in_amount = (edited_purchase["重量(kg)"] * edited_purchase["进货单价"]).sum()
+        
+        st.info(f"📊 本次入库总重：{total_in_weight:,.2f} kg | 总金额：¥ {total_in_amount:,.2f}")
+
+        # 3. 提交逻辑
+        if st.button("确认提交入库", type="primary", use_container_width=True):
+            if not supplier:
+                st.error("⚠️ 供应商不能为空！")
+            elif total_in_weight <= 0:
+                st.error("⚠️ 请填写至少一项有效的入库明细！")
+            else:
+                try:
+                    with engine.begin() as conn:
+                        for _, row in edited_purchase.iterrows():
+                            p_name = row['货品名称']
+                            p_spec = row['规格型号']
+                            p_num = row['重量(kg)']
+                            p_price = row['进货单价']
+                            
+                            # A. 自动创建或更新货品档案
                             conn.execute(text("""
                                 INSERT INTO products (name, spec, stock) 
                                 SELECT :p, :s, 0 
-                                WHERE NOT EXISTS (
-                                    SELECT 1 FROM products WHERE name = :p AND spec = :s
-                                )
+                                WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = :p AND spec = :s)
                             """), {"p": p_name, "s": p_spec})
 
                             # B. 增加库存
                             conn.execute(text("""
                                 UPDATE products SET stock = stock + :n 
                                 WHERE name = :p AND spec = :s
-                            """), {"n": in_num, "p": p_name, "s": p_spec})
+                            """), {"n": p_num, "p": p_name, "s": p_spec})
                             
-                            # C. 写入历史流水 (使用 NOW() 记录数据库当前北京时间)
+                            # C. 写入流水
                             conn.execute(text("""
-                                INSERT INTO orders (type, customer, product, num, total_amount, payment_status, is_active, created_at)
-                                VALUES ('采购入库', :supplier, :product, :num, :amount, 'paid', 1, NOW())
+                                INSERT INTO orders (type, customer, product, num, total_amount, payment_status, created_at)
+                                VALUES ('采购入库', :supplier, :product, :num, :amount, 'paid', NOW())
                             """), {
                                 "supplier": supplier,
                                 "product": f"{p_name} | {p_spec}",
-                                "num": in_num,
-                                "amount": round(in_num * in_price, 2)
+                                "num": p_num,
+                                "amount": round(p_num * p_price, 2)
                             })
-                        
-                        # 3. 简洁反馈
-                        st.success(f"✅ 入库成功：{supplier} | {p_name} | {in_num}公斤")
-                        
-                        # 停留 1.5 秒后自动刷新清空表单
-                        import time
-                        time.sleep(1.5)
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"❌ 系统执行失败: {e}")
+                    
+                    st.success(f"✅ 已成功入库：{len(edited_purchase)} 项货品！")
+                    st.balloons()
+                    # 自动刷新以清空表格
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ 入库失败: {e}")
     # --- C. 销售出库 (多行动态版) ---
     elif menu == "📤 销售出库":
         st.header("📤 销售出库 (多行录入)")
