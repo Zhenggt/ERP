@@ -237,117 +237,128 @@ if check_password():
                         
                     except Exception as e:
                         st.error(f"❌ 系统执行失败: {e}")
-    # --- C. 销售出库 ---
+    # --- C. 销售出库 (多行动态版) ---
     elif menu == "📤 销售出库":
-        st.header("📤 销售出库")
+        st.header("📤 销售出库 (多行录入)")
         
-        # 1. 准备数据
+        # 1. 基础资料准备
         df_p = pd.read_sql("SELECT name, spec, stock FROM products WHERE stock > 0", engine)
         df_c = pd.read_sql("SELECT name, phone, address, remark FROM customers", engine)
         
         if not df_p.empty:
             df_p['display'] = df_p['name'] + " | " + df_p['spec'].fillna("标准")
-            col1, col2 = st.columns(2)
-            with col1:
-                t_c = st.selectbox("👤 选择客户", ["散客"] + df_c['name'].tolist())
-                s_o = st.selectbox("📦 选择货品", df_p['display'].tolist())
-            with col2:
-                num = st.number_input("⚖️ 重量 (kg)", min_value=0.0)
-                price = st.number_input("💰 单价 (元)", min_value=0.0)
-                pay_s = st.radio("付款状态", ["已结清", "客户欠款"], horizontal=True)
             
-            # 你要求的“单据备注”
-            user_remark = st.text_input("📝 本单备注", placeholder="如：加急、自提、或特殊要求")
+            # 客户选择
+            t_c = st.selectbox("👤 选择收货单位 (客户)", ["散客"] + df_c['name'].tolist())
+            pay_s = st.radio("付款状态", ["已结清", "客户欠款"], horizontal=True)
+            user_remark = st.text_input("📝 总单备注", placeholder="如：整车发货、自提等")
+
+            st.markdown("---")
+            st.write("📦 **货品明细录入** (点击下方 `+` 号添加多行)")
+
+            # 2. 核心：多行数据编辑器
+            # 定义初始行
+            init_df = pd.DataFrame([
+                {"货品": df_p['display'].iloc[0], "数量(kg)": 0.0, "单价(元)": 0.0}
+            ])
+
+            edited_df = st.data_editor(
+                init_df,
+                num_rows="dynamic", # 允许动态增减行
+                column_config={
+                    "货品": st.column_config.SelectboxColumn("货品选择", options=df_p['display'].tolist(), required=True),
+                    "数量(kg)": st.column_config.NumberColumn("重量", min_value=0.0, format="%.2f"),
+                    "单价(元)": st.column_config.NumberColumn("单价", min_value=0.0, format="%.2f"),
+                },
+                use_container_width=True,
+                key="sale_editor"
+            )
+
+            # 3. 自动汇总计算
+            total_num = edited_df["数量(kg)"].sum()
+            total_money = (edited_df["数量(kg)"] * edited_df["单价(元)"]).sum()
             
-            total = round(num * price, 2)
-            st.info(f"合计金额：¥ {total:,.2f}")
-            
-            if st.button("确认提交并生成单据", width='stretch'):
-                # --- 关键：解决北京时间 ---
-                # 无论服务器在哪，强制计算北京时间
-                bj_time_now = datetime.now(timezone(timedelta(hours=8)))
-                bj_str = bj_time_now.strftime('%Y-%m-%d %H:%M:%S')
-                
-                # --- 关键：抓取客户资料及其备注 ---
-                c_phone, c_address, c_file_remark = "未登记", "无地址", ""
-                if t_c != "散客":
-                    cust_info = df_c[df_c['name'] == t_c].iloc[0]
-                    c_phone = cust_info['phone'] if cust_info['phone'] else "未登记"
-                    c_address = cust_info['address'] if cust_info['address'] else "无地址"
-                    c_file_remark = cust_info['remark'] if cust_info['remark'] else ""
+            col_m1, col_m2 = st.columns(2)
+            col_m1.metric("本次合计重量", f"{total_num:,.2f} kg")
+            col_m2.metric("应收总金额", f"¥ {total_money:,.2f}")
 
-                # 数据库写入
-                p_n, p_s = s_o.split(" | ")[0], s_o.split(" | ")[1]
-                p_status = 'paid' if pay_s == "已结清" else 'unpaid'
-                
-                with engine.connect() as conn:
-                    conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), {"n": num, "p": p_n, "s": p_s})
-                    conn.execute(text("""
-                        INSERT INTO orders (type, customer, product, num, price, total_amount, payment_status, created_at) 
-                        VALUES ('销售', :c, :p, :n, :pr, :t, :ps, :dt)
-                    """), {"c": t_c, "p": s_o, "n": num, "pr": price, "t": total, "ps": p_status, "dt": bj_str})
-                    conn.commit()
-                
-                st.success(f"✅ 出库成功！记录时间：{bj_str}")
+            if st.button("🚀 确认提交并批量生成三联单", width='stretch', type="primary"):
+                if total_num <= 0:
+                    st.error("❌ 错误：货品重量不能为空！")
+                else:
+                    try:
+                        bj_time_now = datetime.now(timezone(timedelta(hours=8)))
+                        bj_str = bj_time_now.strftime('%Y-%m-%d %H:%M:%S')
+                        p_status = 'paid' if pay_s == "已结清" else 'unpaid'
+                        
+                        # 准备三联单 HTML 表格行
+                        rows_html = ""
+                        
+                        with engine.begin() as conn:
+                            for _, row in edited_df.iterrows():
+                                p_n, p_s = row['货品'].split(" | ")[0], row['货品'].split(" | ")[1]
+                                row_total = round(row['数量(kg)'] * row['单价(元)'], 2)
+                                
+                                # A. 扣减库存
+                                conn.execute(text("UPDATE products SET stock = stock - :n WHERE name = :p AND spec = :s"), 
+                                             {"n": row['数量(kg)'], "p": p_n, "s": p_s})
+                                
+                                # B. 写入流水
+                                conn.execute(text("""
+                                    INSERT INTO orders (type, customer, product, num, price, total_amount, payment_status, created_at) 
+                                    VALUES ('销售', :c, :p, :n, :pr, :t, :ps, :dt)
+                                """), {"c": t_c, "p": row['货品'], "n": row['数量(kg)'], "pr": row['单价(元)'], "t": row_total, "ps": p_status, "dt": bj_str})
+                                
+                                # C. 构造 HTML 行
+                                rows_html += f"""
+                                <tr style="height:40px;">
+                                    <td style="border:1px solid #000;">{p_n}</td>
+                                    <td style="border:1px solid #000;">{p_s}</td>
+                                    <td style="border:1px solid #000;">{row['数量(kg)']}</td>
+                                    <td style="border:1px solid #000;">{row['单价(元)']}</td>
+                                    <td style="border:1px solid #000;">{row_total}</td>
+                                </tr>
+                                """
 
-                # --- 核心：完全复刻你的经典三联单样式 ---
-                bill_html = f"""
-                <div id="bill" style="width:185mm; padding:8mm; border:2px dashed #000; font-family:'SimSun', 'Songti SC', serif; background:#fff; color:#000; margin:auto;">
-                    <h2 style="text-align:center; font-size:26px; font-weight:bold; letter-spacing:10px; text-decoration:underline; margin-bottom:15px;">销售出库单</h2>
-                    
-                    <table style="width:100%; font-size:15px; margin-bottom:10px;">
-                        <tr>
-                            <td><strong>收货单位：</strong>{t_c}</td>
-                            <td style="text-align:right;"><strong>日期：</strong>{bj_time_now.strftime('%Y-%m-%d %H:%M')}</td>
-                        </tr>
-                        <tr>
-                            <td colspan="2"><strong>联系电话：</strong>{c_phone} &nbsp;&nbsp; <strong>收货地址：</strong>{c_address}</td>
-                        </tr>
-                    </table>
+                        # 4. 生成完整的三联单 HTML
+                        # 此处复用你之前的样式，但将 <tbody> 里的内容换成动态生成的 rows_html
+                        bill_html = f"""
+                        <div id="bill" style="width:185mm; padding:8mm; border:2px dashed #000; font-family:'SimSun'; background:#fff; color:#000; margin:auto;">
+                            <h2 style="text-align:center;">销售出库单 (多行)</h2>
+                            <table style="width:100%; margin-bottom:10px;">
+                                <tr><td><strong>收货单位：</strong>{t_c}</td><td style="text-align:right;"><strong>日期：</strong>{bj_str}</td></tr>
+                            </table>
+                            <table style="width:100%; border-collapse:collapse; border:1px solid #000; text-align:center;">
+                                <thead style="background:#f2f2f2;">
+                                    <tr>
+                                        <th style="border:1px solid #000;">货品</th><th style="border:1px solid #000;">规格</th>
+                                        <th style="border:1px solid #000;">重量</th><th style="border:1px solid #000;">单价</th>
+                                        <th style="border:1px solid #000;">金额</th>
+                                    </tr>
+                                </thead>
+                                <tbody>{rows_html}</tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="2" style="border:1px solid #000; font-weight:bold;">合计</td>
+                                        <td style="border:1px solid #000; font-weight:bold;">{total_num}</td>
+                                        <td style="border:1px solid #000;">-</td>
+                                        <td style="border:1px solid #000; font-weight:bold;">{total_money}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                            <p><strong>备注：</strong>{user_remark} | 状态：{pay_s}</p>
+                            <div style="margin-top:20px; display:flex; justify-content:space-between;">
+                                <span>制单：管理员</span><span>送货人签字：__________</span><span>收货人签字：__________</span>
+                            </div>
+                        </div>
+                        <div style="text-align:center; margin-top:15px;"><button onclick="window.print()">🖨️ 打印三联单</button></div>
+                        """
+                        st.components.v1.html(bill_html, height=600, scrolling=True)
+                        st.success("✅ 多行数据已批量入库！")
+                        st.cache_data.clear()
 
-                    <table style="width:100%; border-collapse:collapse; border:2px solid #000; text-align:center;">
-                        <thead>
-                            <tr style="background:#f2f2f2;">
-                                <th style="border:2px solid #000; padding:8px;">货品名称</th>
-                                <th style="border:2px solid #000; padding:8px;">规格型号</th>
-                                <th style="border:2px solid #000; padding:8px;">重量(kg)</th>
-                                <th style="border:2px solid #000; padding:8px;">单价</th>
-                                <th style="border:2px solid #000; padding:8px;">金额</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr style="height:60px;">
-                                <td style="border:2px solid #000;">{p_n}</td>
-                                <td style="border:2px solid #000;">{p_s}</td>
-                                <td style="border:2px solid #000;">{num}</td>
-                                <td style="border:2px solid #000;">{price}</td>
-                                <td style="border:2px solid #000;">{total}</td>
-                            </tr>
-                            <tr>
-                                <td style="border:2px solid #000; font-weight:bold;">单据备注</td>
-                                <td colspan="4" style="border:2px solid #000; text-align:left; padding-left:15px;">
-                                    {user_remark} &nbsp; {"(档案备注: "+c_file_remark+")" if c_file_remark else ""}
-                                    <span style="float:right; margin-right:15px;">状态：{"【已结清】" if p_status=='paid' else "【客户欠款】"}</span>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                    <div style="margin-top:30px; display:flex; justify-content:space-between; font-size:15px;">
-                        <span>制单：{st.session_state['user_role']}</span>
-                        <span>送货人签字：__________</span>
-                        <span>收货人签字：__________</span>
-                    </div>
-                </div>
-
-                <div style="text-align:center; margin-top:15px;">
-                    <button onclick="window.print()" style="padding:10px 40px; background:#000; color:#fff; border:none; cursor:pointer; font-size:16px;">
-                        🖨️ 点击打印单据
-                    </button>
-                </div>
-                """
-                st.components.v1.html(bill_html, height=550)
-                st.cache_data.clear()
+                    except Exception as e:
+                        st.error(f"❌ 批量提交失败: {e}")
 # --- 模块 D: 历史流水 (交互编辑版-修复版) ---
     elif "流水" in menu:
         st.header("🧾 业务流水记录")
