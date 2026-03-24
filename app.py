@@ -65,8 +65,8 @@ def check_password():
 
     if not st.session_state["password_correct"]:
         st.title("🔒 策启金属ERP系统")
-        u = st.text_input("账号")
-        p = st.text_input("密码", type="password")
+        u = st.text_input("账号", placeholder="请输入账号", label_visibility="collapsed")
+        p = st.text_input("密码", type="password", placeholder="请输入密码", label_visibility="collapsed")
         
         if st.button("登录系统", use_container_width=True): # 注意：Streamlit 最新版用 use_container_width 代替 width='stretch'
             try:
