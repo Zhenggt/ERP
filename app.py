@@ -33,7 +33,7 @@ def get_aluminum_price():
     except Exception as e:
         return {"price": "接口维护", "change": "0", "status": "error"}
 # --- 2. 基础配置 ---
-st.set_page_config(page_title="铝业ERP系统", layout="wide")
+st.set_page_config(page_title="策启金属ERP系统", layout="wide")
 
 def get_beijing_time():
     return datetime.now(timezone(timedelta(hours=8)))
